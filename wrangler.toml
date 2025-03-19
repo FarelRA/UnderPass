@@ -1,0 +1,28 @@
+name = "underpass"
+type = "javascript"
+compatibility_date = "2025-03-01"
+
+[build]
+command = "npm run build"
+
+[observability]
+enabled = true
+
+[vars]
+# Used to authenticate with the V2Ray/Xray client.
+# Set USER_ID in Cloudflare Secrets instead of hardcoding it here.
+#USER_ID = "c55ba35f-12f6-436e-a451-4ce982c4ec1c"
+
+# Password used to protect `/info` path.
+# Set USER_ID in Cloudflare Secrets instead of hardcoding it here.
+#PASSWORD = "yourpasswd"
+
+# Proxy address to connect to the Cloudflare Network.
+# Cloudflare Workers prohibit direct socket connections to Cloudflare IPs.
+PROXY_ADDR = "gh.proxy.farelra.my.id:443"
+
+# DNS-over-HTTPS url to use when resolving DNS queries.
+DOH_URL = "https://1.1.1.1/dns-query"
+
+# Determines the log level.
+LOG_LEVEL = "INFO"

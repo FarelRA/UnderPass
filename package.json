@@ -1,0 +1,13 @@
+{
+  "name": "underpass",
+  "version": "1.0.1",
+  "description": "Edge network tunnel implemented using Cloudflare Workers",
+  "scripts": {
+    "dev": "wrangler dev",
+    "build": "wrangler build",
+    "publish": "wrangler publish"
+  },
+  "devDependencies": {
+    "wrangler": "^4.0.0"
+  }
+}
