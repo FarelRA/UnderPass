@@ -1,7 +1,7 @@
 {
   "name": "underpass",
   "version": "1.0.1",
-  "description": "Edge network tunnel implemented using Cloudflare Workers",
+  "description": "Edge network VLESS tunnel implemented using Cloudflare Workers",
   "scripts": {
     "dev": "wrangler dev",
     "build": "wrangler build",
