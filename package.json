@@ -2,12 +2,13 @@
   "name": "underpass",
   "version": "1.0.2",
   "description": "Edge network VLESS tunnel implemented using Cloudflare Workers",
+  "private": true,
   "scripts": {
+    "deploy": "wrangler deploy",
     "dev": "wrangler dev",
-    "build": "wrangler build",
-    "publish": "wrangler publish"
+    "start": "wrangler dev"
   },
   "devDependencies": {
-    "wrangler": "^4.0.0"
+    "wrangler": "^3.101.0",
   }
 }
