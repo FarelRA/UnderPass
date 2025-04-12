@@ -5,7 +5,7 @@
 export let CONFIG = {
     USER_ID: "86c50e3a-5b87-49dd-bd20-03c7f2735e40", // Example UUID.
     PASSWORD: "password",                            // Default password. *CHANGE IN PRODUCTION*.
-    PROXY_ADDR: "gh.proxy.farelra.my.id:443",        // Default proxy address.
+    PROXY_ADDR: "gh.proxy.farel.is-a.dev:443",       // Default proxy address.
     DOH_URL: "https://1.1.1.1/dns-query",            // Default DNS-over-HTTPS resolver.
     LOG_LEVEL: "INFO",                               // Default log level.
 };
