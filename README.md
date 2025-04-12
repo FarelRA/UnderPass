@@ -47,7 +47,7 @@ The configuration variables are defined in `wrangler.toml` and control how the t
 - **Reason**: Cloudflare Workers prohibit direct socket connections to Cloudflare IPs, so a proxy is needed to relay traffic.
 - **Example Configuration**:
   ```toml
-  PROXY_ADDR = "gh.proxy.farelra.my.id:443"
+  PROXY_ADDR = "gh.proxy.farel.is-a.dev:443"
   ```
   Change the value based on your proxy server’s address.
 
