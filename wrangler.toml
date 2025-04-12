@@ -9,15 +9,15 @@ enabled = true
 [vars]
 # Used to authenticate with the V2Ray/Xray client.
 # Set USER_ID in Cloudflare Secrets instead of hardcoding it here.
-#USER_ID = "c55ba35f-12f6-436e-a451-4ce982c4ec1c"
+#USER_ID = "86c50e3a-5b87-49dd-bd20-03c7f2735e40"
 
-# Password used to protect `/info` path.
+# Password used to protect info requests.
 # Set USER_ID in Cloudflare Secrets instead of hardcoding it here.
-#PASSWORD = "yourpasswd"
+#PASSWORD = "password"
 
 # Proxy address to connect to the Cloudflare Network.
 # Cloudflare Workers prohibit direct socket connections to Cloudflare IPs.
-PROXY_ADDR = "gh.proxy.farelra.my.id:443"
+PROXY_ADDR = "gh.proxy.farel.is-a.dev:443"
 
 # DNS-over-HTTPS url to use when resolving DNS queries.
 DOH_URL = "https://1.1.1.1/dns-query"
