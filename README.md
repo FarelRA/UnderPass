@@ -1,6 +1,6 @@
 # UnderPass
 
-[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/FarelRA/underpass/tree/main)
+[![Deploy to Cloudflare Workers](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/FarelRA/UnderPass/tree/main)
 
 **UnderPass** is an VLESS tunnel powered by Cloudflare Workers, allowing traffic to be securely proxied through the Cloudflare network. This solution is particularly useful for users who need reliable connectivity while bypassing restrictions.
 
@@ -83,11 +83,11 @@ To set up this project using Cloudflare Workers, follow these steps:
 1. **Install Dependencies** (Choose one based on your package manager):
 
    ```sh
-   npm init cloudflare my-project underpass
+   npm init cloudflare my-project UnderPass
    # or
-   yarn create cloudflare my-project underpass
+   yarn create cloudflare my-project UnderPass
    # or
-   pnpm create cloudflare my-project underpass
+   pnpm create cloudflare my-project UnderPass
    ```
 
 2. **Modify Configuration**:
