@@ -10,7 +10,7 @@ enabled = true
 #USER_ID = "86c50e3a-5b87-49dd-bd20-03c7f2735e40"
 
 # Password used to protect info requests.
-# Set USER_ID in Cloudflare Secrets instead of hardcoding it here.
+# Set PASSWORD in Cloudflare Secrets instead of hardcoding it here.
 #PASSWORD = "password"
 
 # Proxy address to connect to the Cloudflare Network.
