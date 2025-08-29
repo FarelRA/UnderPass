@@ -1,7 +1,5 @@
-name = "underpass"
+name = "lesspass"
 main = "src/index.js"
-
-compatibility_date = "2025-03-01"
 
 [observability]
 enabled = true
@@ -17,7 +15,7 @@ enabled = true
 
 # Proxy address to connect to the Cloudflare Network.
 # Cloudflare Workers prohibit direct socket connections to Cloudflare IPs.
-PROXY_ADDR = "gh.proxy.farel.is-a.dev:443"
+PROXY_ADDR = "bpb.yousef.isegaro.com:443"
 
 # DNS-over-HTTPS url to use when resolving DNS queries.
 DOH_URL = "https://1.1.1.1/dns-query"

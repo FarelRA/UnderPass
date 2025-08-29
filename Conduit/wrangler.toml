@@ -1,0 +1,10 @@
+name = "conduit"
+main = "src/index.js"
+
+[observability]
+enabled = true
+
+#[vars]
+# Password used to protect tunnel requests.
+# Set PASSWORD in Cloudflare Secrets instead of hardcoding it here.
+#PASSWORD = "password"
