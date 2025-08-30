@@ -1,62 +1,75 @@
-// Deno H2 TCP Tunnel Server
+// Deno H2 TCP Tunnel Server with Logging
 
 // --- Configuration ---
 const PASSWORD = Deno.env.get('PASSWORD');
 const HOSTNAME = Deno.env.get('HOSTNAME') || '0.0.0.0';
 const PORT = parseInt(Deno.env.get('PORT') || '8080', 10);
 
-// --- Server ---
-console.log(`Starting tunnel server on http://${HOSTNAME}:${PORT}`);
+console.log(`Starting TCP Tunnel Server on ${HOSTNAME}:${PORT}`);
 
+// --- Server ---
 Deno.serve({
   hostname: HOSTNAME,
   port: PORT,
   async handler(request) {
+    console.log('--- New Request ---');
+    console.log(`Method: ${request.method}`);
+    console.log('Headers:', Object.fromEntries(request.headers.entries()));
+
     // 1. Method
     if (request.method !== 'POST') {
+      console.warn('Rejected: invalid method');
       return new Response('Method not allowed', { status: 405 });
     }
 
     // 2. Authentication
     const authHeader = request.headers.get('Authorization');
     if (authHeader !== `Basic ${PASSWORD}`) {
+      console.warn('Rejected: unauthorized');
       return new Response('Unauthorized', { status: 401 });
     }
+    console.log('Authentication passed');
 
     // 3. Target Host
     const targetHostHeader = request.headers.get('X-Target-Host');
     if (!targetHostHeader) {
+      console.warn('Rejected: missing target host');
       return new Response('Missing X-Target-Host header', { status: 400 });
     }
     const targetHost = targetHostHeader.toLowerCase().trim();
     if (!/^[a-zA-Z0-9\-.:[\]]+$/.test(targetHost)) {
+      console.warn(`Rejected: invalid target host "${targetHost}"`);
       return new Response('Invalid target host', { status: 400 });
     }
+    console.log(`Target Host: ${targetHost}`);
 
     // 4. Target Port
     const targetPortStr = request.headers.get('X-Target-Port');
     if (!targetPortStr) {
+      console.warn('Rejected: missing target port');
       return new Response('Missing X-Target-Port header', { status: 400 });
     }
     const targetPort = parseInt(targetPortStr, 10);
     if (isNaN(targetPort) || targetPort < 1 || targetPort > 65535) {
+      console.warn(`Rejected: invalid target port "${targetPortStr}"`);
       return new Response('Invalid target port', { status: 400 });
     }
+    console.log(`Target Port: ${targetPort}`);
 
     try {
       // 5. Connect to Target
+      console.log(`Connecting to ${targetHost}:${targetPort} ...`);
       const socket = await Deno.connect({ hostname: targetHost, port: targetPort });
+      console.log(`Connected to ${targetHost}:${targetPort}`);
 
       // 6. Handle Client to Target Stream
-      // Pipe the client's request body to the target socket.
-      // This is the "Client -> Deno -> Target" stream.
+      console.log(`Streaming Client -> Target (${targetHost}:${targetPort})`);
       request.body.pipeTo(socket.writable).catch(error => {
         console.error(`Client -> Target pipe failed for ${targetHost}:${targetPort}:`, error.message);
       });
 
       // 7. Response Target to Client Stream
-      // We pass socket.readable directly to the Response.
-      // This is the "Target -> Deno -> Client" stream.
+      console.log(`Streaming Target -> Client (${targetHost}:${targetPort})`);
       return new Response(socket.readable, {
         status: 200,
         headers: {
@@ -66,8 +79,7 @@ Deno.serve({
         },
       });
     } catch (error) {
-      // This catches initial setup errors.
-      console.error('Tunnel setup error:', error.message);
+      console.error(`Tunnel setup error for ${targetHost}:${targetPort}:`, error.message);
       return new Response('Internal server error', { status: 500 });
     }
   },
