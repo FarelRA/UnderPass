@@ -74,7 +74,7 @@ Deno.serve({
       (async () => {
         try {
           console.log(`Streaming Client -> Target (${targetHost}:${targetPort})`);
-          await request.body!.pipeTo(socket.writable);
+          await request.body.pipeTo(socket.writable);
         } catch (err) {
           console.warn(`Client -> Target pipe ended for ${targetHost}:${targetPort}: ${err.message}`);
           socket.close();
