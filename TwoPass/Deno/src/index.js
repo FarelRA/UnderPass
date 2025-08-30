@@ -63,20 +63,14 @@ Deno.serve({
       console.log(`Connected to ${targetHost}:${targetPort}`);
 
       // 6. Handle Client to Target Stream
-      console.log(`Streaming Client -> Target (${targetHost}:${targetPort})`);
-      request.body.pipeTo(socket.writable).catch(error => {
-        console.error(`Client -> Target pipe failed for ${targetHost}:${targetPort}:`, error.message);
-      });
+      (async () => {
+        console.log(`Streaming Client -> Target (${targetHost}:${targetPort})`);
+        await request.body!.pipeTo(socket.writable);
+      })();
 
-      // 7. Handle Target to Client Stream
-      const { readable, writable } = new TransformStream();
+      // 7. Response Target to Client Stream
       console.log(`Streaming Target -> Client (${targetHost}:${targetPort})`);
-      socket.readable.pipeTo(writable).catch(error => {
-        console.error(`Target -> Client pipe failed for ${targetHost}:${targetPort}:`, error.message);
-      });
-
-      // 8. Response to Client
-      return new Response(readable, {
+      return new Response(socket.readable, {
         status: 200,
         headers: {
           'Content-Type': 'application/grpc',
