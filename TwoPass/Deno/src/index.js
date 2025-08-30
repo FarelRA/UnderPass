@@ -62,7 +62,7 @@ Deno.serve({
 
       // 2. Run the entire tunnel logic
       console.log(`Connecting to ${targetHost}:${targetPort} ...`);
-      socket = await Deno.connect({ hostname: targetHost, port: targetPort });
+      const socket = await Deno.connect({ hostname: targetHost, port: targetPort });
 
       // Create the two pipe promises to run in parallel.
       const clientToTarget = request.body.pipeTo(socket.writable);
