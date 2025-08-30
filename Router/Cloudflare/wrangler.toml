@@ -15,18 +15,18 @@ enabled = true
 CONFIG = '''
 [
   {
-    "path": "/flyio,
+    "path": "/flyio",
     "backends": [ "https://flyio.farel.is-a.dev" ]
   },
   {
-    "path": "/deno,
+    "path": "/deno",
     "backends": [ "https://deno.farel.is-a.dev" ]
   },
   {
-    "path": "/balance,
+    "path": "/balance",
     "backends": [
-      "https://oracle.farel.is-a.dev"
-      "https://flyio.farel.is-a.dev"
+      "https://oracle.farel.is-a.dev",
+      "https://flyio.farel.is-a.dev",
       "https://deno.farel.is-a.dev"
     ]
   }
