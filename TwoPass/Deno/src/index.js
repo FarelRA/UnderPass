@@ -62,9 +62,10 @@ Deno.serve({
 
       // 6. Start a background task to manage lifecycle of the TCP socket.
       (async () => {
-        let socket: Deno.TcpConn | undefined;
+        // REMOVED TypeScript type annotation: Deno.TcpConn | undefined
+        let socket;
         try {
-          // Connect to the target.
+          // Connect to the target inside the task.
           console.log(`Connecting to ${targetHost}:${targetPort} ...`);
           socket = await Deno.connect({ hostname: targetHost, port: targetPort });
           console.log(`Connected to ${targetHost}:${targetPort}`);
