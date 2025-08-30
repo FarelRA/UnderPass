@@ -15,10 +15,6 @@ enabled = true
 CONFIG = '''
 [
   {
-    "path": "/oracle,
-    "backends": [ "https://oracle.farel.is-a.dev" ]
-  },
-  {
     "path": "/flyio,
     "backends": [ "https://flyio.farel.is-a.dev" ]
   },
