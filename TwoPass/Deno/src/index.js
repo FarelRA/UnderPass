@@ -68,9 +68,16 @@ Deno.serve({
         await request.body.pipeTo(socket.writable);
       })();
 
+      // 7. Handle Target to Client Stream
+      const { readable, writable } = new TransformStream();
+      (async () => {
+        console.log(`Streaming Target -> Client (${targetHost}:${targetPort})`);
+        await socket.readable.pipeTo(writable);
+      })();
+
       // 7. Response Target to Client Stream
       console.log(`Streaming Target -> Client (${targetHost}:${targetPort})`);
-      return new Response(socket.readable, {
+      return new Response(readable, {
         status: 200,
         headers: {
           'Content-Type': 'application/grpc',
