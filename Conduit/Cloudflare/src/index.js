@@ -1,5 +1,5 @@
 /**
- * Cloudflare Worker: Permissive CORS Proxy (Refactored)
+ * Cloudflare Worker: Permissive CORS Proxy
  *
  * How it works:
  * 1. Intercepts requests to the worker URL.
