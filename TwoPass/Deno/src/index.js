@@ -57,29 +57,56 @@ Deno.serve({
     console.log(`Target Port: ${targetPort}`);
 
     try {
-      // 1. Create new TransformStream to Decouple the stream
+      // 1. Decouple the response stream from the raw socket.
       const { readable, writable } = new TransformStream();
 
-      // 2. Run the entire tunnel logic
-      console.log(`Connecting to ${targetHost}:${targetPort} ...`);
-      const socket = await Deno.connect({ hostname: targetHost, port: targetPort });
+      // 2. Run the entire tunnel logic in a background task.
+      (async () => {
+        let socket;
+        try {
+          console.log(`Connecting to ${targetHost}:${targetPort} ...`);
+          socket = await Deno.connect({ hostname: targetHost, port: targetPort });
+          console.log(`Connected to ${targetHost}:${targetPort}`);
 
-      // Create the two pipe promises to run in parallel.
-      const clientToTarget = request.body.pipeTo(socket.writable);
-      const targetToClient = socket.readable.pipeTo(writable);
+          // Create the two pipe promises to run in parallel.
+          // Let pipeTo handle closing the socket's writable stream automatically.
+          const clientToTarget = request.body.pipeTo(socket.writable);
+          const targetToClient = socket.readable.pipeTo(writable);
 
-      // Add individual logging to see when each pipe finishes.
-      clientToTarget.catch(err => console.log(`Client -> Target pipe ended: ${err.message}`));
-      targetToClient.catch(err => console.log(`Target -> Client pipe ended: ${err.message}`));
+          // Add individual logging to see when each pipe finishes.
+          clientToTarget.catch(err => console.log(`[INFO] Client -> Target pipe ended: ${err.message}`));
+          targetToClient.catch(err => console.log(`[INFO] Target -> Client pipe ended: ${err.message}`));
 
-      console.log(`Pipes for ${targetHost}:${targetPort} are running in parallel.`);
+          console.log(`Pipes for ${targetHost}:${targetPort} are running in parallel.`);
 
-      // This is the key: wait for BOTH pipes to finish, for any reason.
-      await Promise.allSettled([clientToTarget, targetToClient]);
+          // This is the key: wait for BOTH pipes to finish, for any reason.
+          await Promise.allSettled([clientToTarget, targetToClient]);
 
-      console.log(`Both pipes for ${targetHost}:${targetPort} have completed.`);
+          console.log(`Both pipes for ${targetHost}:${targetPort} have completed.`);
 
-      // 3. Immediately return the clean, decoupled stream as the response
+        } catch (err) {
+          // This only catches the initial Deno.connect error.
+          console.error(`Tunnel setup error for ${targetHost}:${targetPort}: ${err.message}`);
+          await writable.abort(err).catch(() => {});
+        } finally {
+          // This finally block runs only after both pipes are settled.
+          // This prevents the race condition and the BadResource error.
+          console.log(`Cleaning up resources for ${targetHost}:${targetPort}.`);
+          if (socket) {
+            try {
+              // A simple close is sufficient here because both streams are done.
+              socket.close();
+            } catch (e) {
+              // It's possible the resource is already gone, which is fine.
+              if (!(e instanceof Deno.errors.BadResource)) {
+                console.error(`Unexpected cleanup error: ${e.message}`);
+              }
+            }
+          }
+        }
+      })();
+
+      // 3. Immediately return the clean, decoupled stream as the response.
       return new Response(readable, {
         status: 200,
         headers: {
