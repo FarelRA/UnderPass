@@ -1,0 +1,13 @@
+{
+  "name": "router",
+  "version": "1.0.1",
+  "description": "Edge Router/Load-Balancer/Rewriter implemented in Cloudflare Workers",
+  "private": true,
+  "scripts": {
+    "deploy": "wrangler deploy",
+    "dev": "wrangler dev"
+  },
+  "devDependencies": {
+    "wrangler": ">=4.0.0"
+  }
+}

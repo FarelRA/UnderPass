@@ -1,0 +1,38 @@
+name = "router"
+main = "src/index.js"
+compatibility_date = "2025-08-29"
+
+[observability]
+enabled = true
+
+[vars]
+# Define your routes as a JSON string.
+# - "path": The URL prefix to match.
+# - "backends": An array of one or more backend URLs.
+#
+# IMPORTANT: Order matters! Place more specific
+# paths (/api/v1) before less specific ones (/).
+CONFIG = '''
+[
+  {
+    "path": "/oracle,
+    "backends": [ "https://oracle.farel.is-a.dev" ]
+  },
+  {
+    "path": "/flyio,
+    "backends": [ "https://flyio.farel.is-a.dev" ]
+  },
+  {
+    "path": "/deno,
+    "backends": [ "https://deno.farel.is-a.dev" ]
+  },
+  {
+    "path": "/balance,
+    "backends": [
+      "https://oracle.farel.is-a.dev"
+      "https://flyio.farel.is-a.dev"
+      "https://deno.farel.is-a.dev"
+    ]
+  }
+]
+'''
