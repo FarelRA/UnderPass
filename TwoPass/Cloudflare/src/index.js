@@ -50,7 +50,7 @@ export default {
         },
       });
     } catch (error) {
-      // This catches initial setup errors (e.g., connect() failing)
+      // This catches initial setup errors.
       console.error('Tunnel setup error:', error.message);
       return new Response('Internal server error', { status: 500 });
     }
