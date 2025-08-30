@@ -62,21 +62,26 @@ Deno.serve({
       const socket = await Deno.connect({ hostname: targetHost, port: targetPort });
       console.log(`Connected to ${targetHost}:${targetPort}`);
 
-      // 6. Handle Client to Target Stream
-      (async () => {
-        console.log(`Streaming Client -> Target (${targetHost}:${targetPort})`);
-        await request.body.pipeTo(socket.writable);
-      })();
-
-      // 7. Handle Target to Client Stream
-      console.log(`Streaming Target -> Client (${targetHost}:${targetPort})`);
       const { readable, writable } = new TransformStream();
+
+      // 6. The Target -> Client stream
+      console.log(`Streaming Target -> Client (${targetHost}:${targetPort})`);
       socket.readable.pipeTo(writable).catch((err) => {
-        console.warn(`Target -> Client pipe failed for ${targetHost}:${targetPort}: ${err.message}`);
+        console.warn(`Target -> Client pipe ended for ${targetHost}:${targetPort}: ${err.message}`);
       });
 
-      // 7. Response Target to Client Stream
-      console.log(`Streaming Target -> Client (${targetHost}:${targetPort})`);
+      // 7. The Client -> Target stream
+      (async () => {
+        try {
+          console.log(`Streaming Client -> Target (${targetHost}:${targetPort})`);
+          await request.body!.pipeTo(socket.writable);
+        } catch (err) {
+          console.warn(`Client -> Target pipe ended for ${targetHost}:${targetPort}: ${err.message}`);
+          socket.close();
+        }
+      })();
+
+      // 8. Response to Client
       return new Response(readable, {
         status: 200,
         headers: {
