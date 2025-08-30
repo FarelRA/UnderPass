@@ -104,7 +104,6 @@ Deno.serve({
           'X-Frame-Options': 'DENY',
         },
       });
-      });
     } catch (error) {
       console.error(`Tunnel setup error for ${targetHost}:${targetPort}:`, error.message);
       return new Response('Internal server error', { status: 500 });
