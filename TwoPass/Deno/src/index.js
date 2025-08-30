@@ -63,10 +63,10 @@ Deno.serve({
       console.log(`Connected to ${targetHost}:${targetPort}`);
 
       // 6. Handle Client to Target Stream
-      (async () => {
-        console.log(`Streaming Client -> Target (${targetHost}:${targetPort})`);
-        await request.body.pipeTo(socket.writable);
-      })();
+      console.log(`Streaming Target -> Client (${targetHost}:${targetPort})`);
+      socket.readable.pipeTo(writable).catch((err) => {
+        console.warn(`Target -> Client pipe failed for ${targetHost}:${targetPort}: ${err.message}`);
+      });
 
       // 7. Handle Target to Client Stream
       const { readable, writable } = new TransformStream();
