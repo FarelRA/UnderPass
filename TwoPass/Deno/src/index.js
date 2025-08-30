@@ -6,9 +6,12 @@ const HOSTNAME = Deno.env.get("HOSTNAME") || "0.0.0.0";
 const PORT = parseInt(Deno.env.get("PORT") || "8080", 10);
 
 // --- V2 Protocol State ---
-// This map holds promises for the downstream (target->client) connections.
-// Key: tunnelId (string)
-// Value: { promise: Promise<ReadableStream>, resolve: (stream) => void, reject: (error) => void }
+/**
+ * This map holds promises for the downstream (target->client) connections.
+ * Key: tunnelId (string)
+ * Value: { promise: Promise<ReadableStream>, resolve: (stream: ReadableStream) => void, reject: (error: any) => void }
+ * @type {Map<string, {promise: Promise<ReadableStream>, resolve: (stream: ReadableStream) => void, reject: (error: any) => void}>}
+ */
 const tunnels = new Map();
 
 // --- Server ---
@@ -42,7 +45,10 @@ Deno.serve({
 });
 
 // --- V1 Protocol Handler ---
-async function handleV1Request(request: Request) {
+/**
+ * @param {Request} request
+ */
+async function handleV1Request(request) {
   // 1. Method
   if (request.method !== "POST") {
     return new Response("[V1] Method not allowed", { status: 405 });
@@ -77,7 +83,7 @@ async function handleV1Request(request: Request) {
     console.log(`[V1] Connected to target ${targetHost}:${targetPort}`);
 
     // 5. Handle Client to Target Stream
-    request.body!.pipeTo(socket.writable).catch(err => {
+    request.body.pipeTo(socket.writable).catch(err => {
       console.error(`[V1] client-to-target stream error:`, err.message);
     });
 
@@ -97,7 +103,11 @@ async function handleV1Request(request: Request) {
 }
 
 // --- V2 Protocol Handler ---
-async function handleV2Request(request: Request, tunnelId: string) {
+/**
+ * @param {Request} request
+ * @param {string} tunnelId
+ */
+async function handleV2Request(request, tunnelId) {
   if (request.method === "POST") {
     // Handles the client -> target upstream data
     return handleV2Post(request, tunnelId);
@@ -109,7 +119,11 @@ async function handleV2Request(request: Request, tunnelId: string) {
   }
 }
 
-async function handleV2Post(request: Request, tunnelId: string) {
+/**
+ * @param {Request} request
+ * @param {string} tunnelId
+ */
+async function handleV2Post(request, tunnelId) {
   // 1. Check for existing tunnel ID
   if (tunnels.has(tunnelId)) {
     return new Response("[V2] Tunnel ID already in use", { status: 409 });
@@ -137,16 +151,16 @@ async function handleV2Post(request: Request, tunnelId: string) {
 
   // 4. Create a promise placeholder for the GET request to await.
   // This is key to handling the race condition where GET might arrive first.
-  let resolveStream: (stream: ReadableStream) => void;
-  let rejectStream: (error: Error) => void;
-  const streamPromise = new Promise<ReadableStream>((resolve, reject) => {
+  let resolveStream;
+  let rejectStream;
+  const streamPromise = new Promise((resolve, reject) => {
     resolveStream = resolve;
     rejectStream = reject;
   });
   tunnels.set(tunnelId, {
     promise: streamPromise,
-    resolve: resolveStream!,
-    reject: rejectStream!,
+    resolve: resolveStream,
+    reject: rejectStream,
   });
 
   try {
@@ -161,7 +175,7 @@ async function handleV2Post(request: Request, tunnelId: string) {
     tunnels.get(tunnelId).resolve(socket.readable);
 
     // 7. Pipe the POST body (client->target) to the socket. Clean up on completion.
-    await request.body!.pipeTo(socket.writable);
+    await request.body.pipeTo(socket.writable);
     console.log(`[V2] POST stream for ${tunnelId} finished.`);
 
     // 8. POST is done, return 201 Created.
@@ -176,7 +190,11 @@ async function handleV2Post(request: Request, tunnelId: string) {
   }
 }
 
-async function handleV2Get(request: Request, tunnelId: string) {
+/**
+ * @param {Request} request
+ * @param {string} tunnelId
+ */
+async function handleV2Get(request, tunnelId) {
   const entry = tunnels.get(tunnelId);
 
   // 1. Handle race condition: GET arrives before POST has created the entry.
@@ -184,7 +202,7 @@ async function handleV2Get(request: Request, tunnelId: string) {
     // Give the POST a moment to arrive, but then fail.
     await new Promise(r => setTimeout(r, 2000));
     if (!tunnels.has(tunnelId)) {
-      return new Response("[V2] unnel not found", { status: 404 });
+      return new Response("[V2] Tunnel not found", { status: 404 });
     }
   }
 
