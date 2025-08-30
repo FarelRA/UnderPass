@@ -60,11 +60,11 @@ export default {
         cache: "no-cache"
       });
 
-      // The Cloudflare Workers runtime will stream the response from the
-      // backend to the client as it arrives, without waiting for the
-      // entire response to be downloaded in the worker.
-      console.log(`Proxying ${request.method} ${path} to ${backendUrl.toString()}`);
-      return await fetch(backendRequest);
+      // Fetch the backend request.
+      const backendResponse = await fetch(backendRequest);
+
+      // Response with the backend body and options.
+      return new Response(backendResponse.body, backendResponse);
     } catch (e) {
       console.error("Error fetching from backend:", e.message);
       return new Response(`Error connecting to backend.`, { status: 502 });
