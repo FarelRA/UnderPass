@@ -57,7 +57,7 @@ export default {
         method: request.method,
         headers: request.headers,
         body: request.body,
-        duplex: 'half',
+        cache: "no-cache"
       });
 
       // The Cloudflare Workers runtime will stream the response from the
