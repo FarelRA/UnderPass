@@ -11,7 +11,6 @@ console.log(`Starting tunnel server on http://${HOSTNAME}:${PORT}`);
 Deno.serve({
   hostname: HOSTNAME,
   port: PORT,
-  // The handler function is the equivalent of the Cloudflare Worker's `fetch` method.
   async handler(request) {
     // 1. Method
     if (request.method !== 'POST') {
@@ -67,7 +66,7 @@ Deno.serve({
         },
       });
     } catch (error) {
-      // This catches initial setup errors (e.g., Deno.connect() failing)
+      // This catches initial setup errors.
       console.error('Tunnel setup error:', error.message);
       return new Response('Internal server error', { status: 500 });
     }
