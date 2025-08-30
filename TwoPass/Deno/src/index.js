@@ -57,32 +57,53 @@ Deno.serve({
     console.log(`Target Port: ${targetPort}`);
 
     try {
-      // 5. Connect to Target
-      console.log(`Connecting to ${targetHost}:${targetPort} ...`);
-      const socket = await Deno.connect({ hostname: targetHost, port: targetPort });
-      console.log(`Connected to ${targetHost}:${targetPort}`);
+      // 5. Create a TransformStream to act as a decoupling bridge.
+      const { readable, writable } = new TransformStream();
 
-      // 6. This is the "Client -> Server -> Target" stream.
+      // 6. Start a background task to manage lifecycle of the TCP socket.
       (async () => {
+        let socket: Deno.TcpConn | undefined;
         try {
-          console.log(`Streaming Client -> Target (${targetHost}:${targetPort})`);
-          await request.body.pipeTo(socket.writable, { preventClose: true });
+          // Connect to the target.
+          console.log(`Connecting to ${targetHost}:${targetPort} ...`);
+          socket = await Deno.connect({ hostname: targetHost, port: targetPort });
+          console.log(`Connected to ${targetHost}:${targetPort}`);
+
+          // Set up both pipes.
+          const clientToTarget = request.body.pipeTo(socket.writable, { preventClose: true });
+          const targetToClient = socket.readable.pipeTo(writable);
+
+          // Wait for the client to finish sending data, then half-close the socket.
+          await clientToTarget;
+          console.log(`Client -> Target pipe finished cleanly for ${targetHost}:${targetPort}.`);
           socket.closeWrite();
+
+          // Wait for the target to finish sending data.
+          await targetToClient;
+          console.log(`Target -> Client pipe finished cleanly for ${targetHost}:${targetPort}.`);
+
         } catch (err) {
-          console.warn(`Client -> Target pipe ended with error for ${targetHost}:${targetPort}: ${err.message}`);
-          socket.close();
+          console.warn(`Tunnel for ${targetHost}:${targetPort} ended with error: ${err.message}`);
+          // If an error occurs, abort the stream we passed to the Response.
+          await writable.abort(err);
+        } finally {
+          // Ensure the raw TCP socket is always closed, no matter what.
+          if (socket) {
+            console.log(`Closing socket for ${targetHost}:${targetPort}.`);
+            socket.close();
+          }
         }
       })();
 
-      // 7. This is the "Target -> Server -> Client" stream.
-      console.log(`Streaming Target -> Client (${targetHost}:${targetPort})`);
-      return new Response(socket.readable, {
+      // 7. Immediately return the readable side of the bridge as the response.
+      return new Response(readable, {
         status: 200,
         headers: {
           'Content-Type': 'application/grpc',
           'Cache-Control': 'no-cache',
           'X-Frame-Options': 'DENY',
         },
+      });
       });
     } catch (error) {
       console.error(`Tunnel setup error for ${targetHost}:${targetPort}:`, error.message);
