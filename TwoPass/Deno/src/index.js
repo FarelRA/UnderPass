@@ -65,7 +65,7 @@ Deno.serve({
       // 6. Handle Client to Target Stream
       (async () => {
         console.log(`Streaming Client -> Target (${targetHost}:${targetPort})`);
-        await request.body!.pipeTo(socket.writable);
+        await request.body.pipeTo(socket.writable);
       })();
 
       // 7. Response Target to Client Stream
