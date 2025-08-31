@@ -69,12 +69,7 @@ export default {
 
 async function handleHTTPProxy(request, backendUrl) {
   // Create a new request to forward to the backend
-  const backendRequest = new Request(backendUrl.toString(), {
-    method: request.method,
-    headers: request.headers,
-    body: request.body,
-    redirect: "manual",
-  });
+  const backendRequest = new Request(backendUrl.toString(), request);
 
   // Fetch the response from the backend
   const backendResponse = await fetch(backendRequest);
@@ -84,21 +79,14 @@ async function handleHTTPProxy(request, backendUrl) {
 }
 
 async function handleWebSocketProxy(request, backendUrl) {
-  // Create a WebSocket pair: one for the client, one for our worker
-  const [clientSocket, serverSocket] = Object.values(new WebSocketPair());
+  // Create a new request to forward to the backend
+  const backendRequest = new Request(backendUrl.toString(), request);
 
-  // Change the backend URL protocol from http(s) to ws(s)
-  const wsBackendUrl = new URL(backendUrl);
-  wsBackendUrl.protocol = wsBackendUrl.protocol.replace('http', 'ws');
-
-  // Establish the WebSocket connection to the backend
-  const backendResponse = await fetch(wsBackendUrl.toString(), {
-    headers: request.headers, // Forward original headers
-  });
+  // Fetch the response from the backend
+  const backendResponse = await fetch(backendRequest);
 
   // If the backend fails the upgrade, return an error
   if (backendResponse.status !== 101) {
-    console.error(`Backend failed to upgrade for ${wsBackendUrl.toString()}:`, backendResponse.status, backendResponse.statusText);
     const body = await backendResponse.text();
     return new Response(`Backend connection error: ${body}`, {
       status: backendResponse.status,
@@ -106,42 +94,9 @@ async function handleWebSocketProxy(request, backendUrl) {
     });
   }
 
-  const backendSocket = backendResponse.webSocket;
-  if (!backendSocket) {
-    return new Response('Backend did not return a WebSocket', { status: 502 });
-  }
-
-  // Set up the proxying logic
-  serverSocket.accept();
-  backendSocket.accept();
-
-  // Forward messages from client to backend
-  serverSocket.addEventListener('message', event => {
-    backendSocket.send(event.data);
-  });
-
-  // Forward messages from backend to client
-  backendSocket.addEventListener('message', event => {
-    serverSocket.send(event.data);
-  });
-
-  // Handle connection closures
-  const closeOrErrorHandler = () => {
-    if (backendSocket.readyState !== WebSocket.READY_STATE_CLOSED) {
-      backendSocket.close(1000, 'Client disconnected');
-    }
-    if (serverSocket.readyState !== WebSocket.READY_STATE_CLOSED) {
-      serverSocket.close(1000, 'Backend disconnected');
-    }
-  };
-  serverSocket.addEventListener('close', closeOrErrorHandler);
-  serverSocket.addEventListener('error', closeOrErrorHandler);
-  backendSocket.addEventListener('close', closeOrErrorHandler);
-  backendSocket.addEventListener('error', closeOrErrorHandler);
-
-  // Return the client-side socket to the browser to complete the handshake
+  // Return the socket to the browser to complete the handshake
   return new Response(null, {
     status: 101,
-    webSocket: clientSocket,
+    webSocket: backendResponse.webSocket,
   });
 }
