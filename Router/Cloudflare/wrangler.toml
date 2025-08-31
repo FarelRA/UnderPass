@@ -16,7 +16,7 @@ CONFIG = '''
 [
   {
     "path": "/flyio",
-    "backends": [ "https://flyio.farel.is-a.dev" ]
+    "backends": [ "https://flyio.farel.is-a.dev/proxy/flyio" ]
   },
   {
     "path": "/deno",
@@ -25,9 +25,9 @@ CONFIG = '''
   {
     "path": "/balance",
     "backends": [
-      "https://oracle.farel.is-a.dev",
-      "https://flyio.farel.is-a.dev",
-      "https://deno.farel.is-a.dev"
+      "https://flyio.farel.is-a.dev/proxy/flyio",
+      "https://deno.farel.is-a.dev",
+      "https://oracle.farel.is-a.dev"
     ]
   }
 ]
