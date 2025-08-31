@@ -1,13 +1,10 @@
 /**
- * A simple router and load balancer for Cloudflare Workers that supports both
- * HTTP and WebSocket proxying.
- *
+ * A simple router and load balancer for Cloudflare Workers.
  * Configured via a CONFIG environment variable.
  *
  * Example CONFIG:
  * [
- *   { "path": "/api/ws", "backends": ["https://ws-backend1.example.com", "https://ws-backend2.example.com"] },
- *   { "path": "/api", "backends": ["https://api-backend.example.com"] },
+ *   { "path": "/api", "backends": ["https://backend1.example.com", "https://backend2.example.com"] },
  *   { "path": "/", "backends": ["https://frontend.example.com"] }
  * ]
  */
@@ -26,77 +23,53 @@ export default {
       return new Response(`Failed to parse config.`, { status: 500 });
     }
 
-    // --- 2. ROUTING ---
+    // --- 2. ROUTING: Find the matching backend service ---
     const url = new URL(request.url);
     const path = url.pathname;
     const search = url.search;
 
+    // Find the first route that matches the beginning of the request path.
+    // Order routes in your config from most specific to least specific.
+    // e.g., `/api/users` should come before `/api`
     const route = routes.find(r => path.startsWith(r.path));
     if (!route) {
       return new Response("Route not found.", { status: 404 });
     }
 
-    // --- 3. LOAD BALANCING ---
+    // --- 3. LOAD BALANCING: Select a backend ---
     if (!route.backends || route.backends.length === 0) {
-      return new Response(`No backends configured for this route.`, { status: 500 });
+      return new Response(`No backends configured.`, { status: 500 });
     }
 
+    // Select a backend at random from the list.
     const randomIndex = Math.floor(Math.random() * route.backends.length);
     const backendUrlString = route.backends[randomIndex];
 
-    // --- 4. DISPATCH TO PROXY HANDLER ---
+    // --- 4. PROXY THE REQUEST & STREAM THE RESPONSE ---
     try {
-      // Construct the full backend URL, stripping the route prefix
+      // Create a URL object for the backend.
       const backendUrl = new URL(backendUrlString);
+
+      // Remove the matched route prefix from the beginning of the request path.
       const remainingPath = path.substring(route.path.length);
+
+      // Combine the backend's path with the remaining part of the request path.
       const combinedPath = [backendUrl.pathname, remainingPath].join('/').replace(/\/+/g, '/');
       backendUrl.pathname = combinedPath;
+
+      // Preserve the original query string.
       backendUrl.search = search;
 
-      // Decide which proxy handler to use based on the Upgrade header
-      if (request.headers.get("Upgrade") === "websocket") {
-        return await handleWebSocketProxy(request, backendUrl);
-      } else {
-        return await handleHTTPProxy(request, backendUrl);
-      }
+      // Create a new Request object to forward to the backend.
+      // We pass through the method, headers, and body from the original request.
+      const backendRequest = new Request(backendUrl.toString(), request);
 
+      // Response with the backend.
+      return await fetch(backendRequest);
     } catch (e) {
-      console.error("Error in proxy handler:", e.message);
+      // Catch any errors occurred.
+      console.error("Error fetching from backend:", e.message);
       return new Response(`Error connecting to backend.`, { status: 502 });
     }
   },
 };
-
-async function handleHTTPProxy(request, backendUrl) {
-  // Create a new request to forward to the backend
-  const backendRequest = new Request(backendUrl.toString(), request);
-
-  // Fetch the response from the backend
-  const backendResponse = await fetch(backendRequest);
-
-  // Return the backend's response directly to the client
-  return new Response(backendResponse.body, backendResponse);
-}
-
-async function handleWebSocketProxy(request, backendUrl) {
-  // Create a new request to forward to the backend
-  const backendRequest = new Request(backendUrl.toString(), request);
-
-  // Fetch the response from the backend
-  const backendResponse = await fetch(backendRequest);
-
-  // If the backend fails the upgrade, return an error
-  if (backendResponse.status !== 101) {
-    const body = await backendResponse.text();
-    return new Response(`Backend connection error: ${body}`, {
-      status: backendResponse.status,
-      statusText: backendResponse.statusText,
-    });
-  }
-
-  // Return the socket to the browser to complete the handshake
-  return new Response(null, {
-    status: 101,
-    webSocket: backendResponse.webSocket,
-  });
-}
