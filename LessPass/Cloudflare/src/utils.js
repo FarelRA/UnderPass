@@ -42,9 +42,9 @@ export function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, ba
 
             // Handle WebSocket close events.
             webSocketServer.addEventListener('close', () => {
-				safeCloseWebSocket(webSocketServer); // Safely close the WebSocket.
-				if (readableStreamCancel) return; // Ignore if stream is canceled.
-				controller.close(); // Close the ReadableStream.
+                safeCloseWebSocket(webSocketServer); // Safely close the WebSocket.
+                if (readableStreamCancel) return; // Ignore if stream is canceled.
+                controller.close(); // Close the ReadableStream.
             });
 
             // Handle WebSocket errors.
@@ -63,7 +63,7 @@ export function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, ba
         },
 
         pull(controller) {
-			// Implement backpressure handling if needed. Currently, no action required.
+            // Implement backpressure handling if needed. Currently, no action required.
         },
 
         cancel(reason) {
@@ -220,7 +220,7 @@ export function isValidUUID(uuid) {
 export function stringifyUUID(arr, offset = 0) {
     const uuid = (
         byteToHex[arr[offset]] + byteToHex[arr[offset + 1]] +
-		byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" +
+        byteToHex[arr[offset + 2]] + byteToHex[arr[offset + 3]] + "-" +
         byteToHex[arr[offset + 4]] + byteToHex[arr[offset + 5]] + "-" +
         byteToHex[arr[offset + 6]] + byteToHex[arr[offset + 7]] + "-" +
         byteToHex[arr[offset + 8]] + byteToHex[arr[offset + 9]] + "-" +
