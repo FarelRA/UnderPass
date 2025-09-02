@@ -19,7 +19,7 @@ enabled = true
 PROXY_ADDR = "bpb.yousef.isegaro.com:443"
 
 # DNS-over-HTTPS url to use when resolving DNS queries.
-DOH_URL = "https://1.1.1.1/dns-query"
+DOH_URL = "https://cloudflare-dns.com/dns-query"
 
 # Determines the log level.
 LOG_LEVEL = "INFO"
