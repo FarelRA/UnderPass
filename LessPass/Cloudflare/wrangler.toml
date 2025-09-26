@@ -14,9 +14,9 @@ enabled = true
 # Set PASSWORD in Cloudflare Secrets instead of hardcoding it here.
 #PASSWORD = "password"
 
-# Proxy address to connect to the Cloudflare Network.
+# Relay address to connect to the Cloudflare Network.
 # Cloudflare Workers prohibit direct socket connections to Cloudflare IPs.
-PROXY_ADDR = "bpb.yousef.isegaro.com:443"
+RELAY_ADDR = "bpb.yousef.isegaro.com:443"
 
 # DNS-over-HTTPS url to use when resolving DNS queries.
 DOH_URL = "https://cloudflare-dns.com/dns-query"
