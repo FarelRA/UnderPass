@@ -122,7 +122,7 @@ export async function handleConduitRequest(request, config, logContext) {
       })
     )
     .catch((err) => {
-      log.error(conduitLogContext, 'ERROR', 'Error in readableWebSocketStream pipeTo:', err);
+      log.error(conduitLogContext, 'ERROR', 'Error in readableWebSocketStream pipeTo:', err.stack || err);
       safeCloseWebSocket(webSocket, conduitLogContext); // Close the WebSocket on error.
     });
 
