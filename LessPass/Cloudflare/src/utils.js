@@ -240,7 +240,7 @@ export function stringifyUUID(arr, offset = 0) {
     byteToHex[arr[offset + 14]] +
     byteToHex[arr[offset + 15]];
   if (!isValidUUID(uuid)) {
-    throw TypeError('Stringified UUID is invalid');
+    throw TypeError('Stringified UUID is invalid: ' + uuid);
   }
   return uuid;
 }
