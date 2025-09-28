@@ -8,27 +8,14 @@ enabled = true
 [vars]
 # Define your routes as a JSON string.
 # - "path": The URL prefix to match.
-# - "backends": An array of one or more backend URLs.
+# - "backend": The URL of your backend.
 #
 # IMPORTANT: Order matters! Place more specific
 # paths (/api/v1) before less specific ones (/).
 CONFIG = '''
 [
-  {
-    "path": "/flyio",
-    "backends": [ "https://flyio.farel.is-a.dev/proxy/flyio" ]
-  },
-  {
-    "path": "/deno",
-    "backends": [ "https://deno.farel.is-a.dev" ]
-  },
-  {
-    "path": "/balance",
-    "backends": [
-      "https://flyio.farel.is-a.dev/proxy/flyio",
-      "https://deno.farel.is-a.dev",
-      "https://oracle.farel.is-a.dev"
-    ]
-  }
+  { "path": "/tunnel/vless-ws", "backend": "https://lesspass.farelra.deno.net" },
+  { "path": "/tunnel/trojan-ws", "backend": "https://tronpass.farelra.deno.net" },
+  { "path": "/tunnel/h2", "backend": "https://twopass.farelra.deno.net" }
 ]
 '''

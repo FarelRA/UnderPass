@@ -1,75 +1,96 @@
 /**
- * A simple router and load balancer for Cloudflare Workers.
- * Configured via a CONFIG environment variable.
+ * A simple, configuration-driven router for Cloudflare Workers.
+ * Configuration is loaded from the CONFIG environment variable as a JSON array.
  *
- * Example CONFIG:
+ * CONFIG Example (JSON String):
  * [
- *   { "path": "/api", "backends": ["https://backend1.example.com", "https://backend2.example.com"] },
- *   { "path": "/", "backends": ["https://frontend.example.com"] }
+ * { "path": "/api/v1", "backend": "https://v1.api-service.com" },
+ * { "path": "/images", "backend": "https://image-cdn.storage.net" },
+ * { "path": "/", "backend": "https://main-frontend.com" }
  * ]
  */
 
 export default {
-  async fetch(request, env) {
-    // --- 1. PARSE CONFIGURATION ---
-    let routes;
-    try {
-      routes = JSON.parse(env.CONFIG);
-      if (!Array.isArray(routes)) {
-        throw new Error("CONFIG must be a JSON array of route objects.");
-      }
-    } catch (e) {
-      console.error("Invalid CONFIG:", e.message);
-      return new Response(`Failed to parse config.`, { status: 500 });
+  /**
+   * Caches the parsed routes after the first request.
+   * This is a simple in-memory cache for the Worker instance's lifetime.
+   */
+  routes: null,
+
+  /**
+   * Initializes and validates the routes configuration from the environment variables.
+   * @param {object} env The environment variables object.
+   * @returns {Array<object>|null} The parsed routes or null on failure.
+   */
+  getRoutes(env) {
+    if (this.routes) {
+      return this.routes; // Use cached routes
     }
 
-    // --- 2. ROUTING: Find the matching backend service ---
-    const url = new URL(request.url);
-    const path = url.pathname;
-    const search = url.search;
+    try {
+      const parsedRoutes = JSON.parse(env.CONFIG);
+      if (!Array.isArray(parsedRoutes)) {
+        throw new Error("CONFIG must be a JSON array of route objects.");
+      }
+      // Basic validation: ensure all routes have path and backend
+      const validRoutes = parsedRoutes.filter(r => r.path && r.backend);
 
-    // Find the first route that matches the beginning of the request path.
-    // Order routes in your config from most specific to least specific.
-    // e.g., `/api/users` should come before `/api`
-    const route = routes.find(r => path.startsWith(r.path));
+      // Cache and return valid routes
+      this.routes = validRoutes;
+      return this.routes;
+    } catch (e) {
+      console.error("Invalid CONFIG:", e.message);
+      return null;
+    }
+  },
+
+  /**
+   * Handles the incoming request.
+   * @param {Request} request The incoming Request object.
+   * @param {object} env The environment variables object.
+   */
+  async fetch(request, env) {
+    const routes = this.getRoutes(env);
+
+    if (!routes) {
+      return new Response("Configuration error: Check CONFIG variable.", { status: 500 });
+    }
+
+    const { pathname, search } = new URL(request.url);
+
+    // --- 1. ROUTING: Find the matching backend service ---
+    // Find the first route that matches the path prefix.
+    const route = routes.find(r => pathname.startsWith(r.path));
+
     if (!route) {
       return new Response("Route not found.", { status: 404 });
     }
 
-    // --- 3. LOAD BALANCING: Select a backend ---
-    if (!route.backends || route.backends.length === 0) {
-      return new Response(`No backends configured.`, { status: 500 });
-    }
-
-    // Select a backend at random from the list.
-    const randomIndex = Math.floor(Math.random() * route.backends.length);
-    const backendUrlString = route.backends[randomIndex];
-
-    // --- 4. PROXY THE REQUEST & STREAM THE RESPONSE ---
+    // --- 2. PROXY THE REQUEST ---
     try {
-      // Create a URL object for the backend.
+      // Destructure path and backend from the matched route
+      const { path: routePrefix, backend: backendUrlString } = route;
       const backendUrl = new URL(backendUrlString);
 
-      // Remove the matched route prefix from the beginning of the request path.
-      const remainingPath = path.substring(route.path.length);
+      // Construct the new path: remove the matched prefix and join with backend path
+      // 2a. Get the remaining path part (e.g., /users/123)
+      const remainingPath = pathname.substring(routePrefix.length);
 
-      // Combine the backend's path with the remaining part of the request path.
-      const combinedPath = [backendUrl.pathname, remainingPath].join('/').replace(/\/+/g, '/');
+      // 2b. Combine paths and clean up potential double slashes
+      const combinedPath = [backendUrl.pathname, remainingPath].join('/').replace(/\/\/+/g, '/');
       backendUrl.pathname = combinedPath;
 
-      // Preserve the original query string.
+      // 2c. Preserve the original query string
       backendUrl.search = search;
 
-      // Create a new Request object to forward to the backend.
-      // We pass through the method, headers, and body from the original request.
+      // Create a new Request and forward it. The original 'request' is passed
+      // as the second argument to inherit method, headers, and body.
       const backendRequest = new Request(backendUrl.toString(), request);
 
-      // Response with the backend.
       return await fetch(backendRequest);
     } catch (e) {
-      // Catch any errors occurred.
-      console.error("Error fetching from backend:", e.message);
-      return new Response(`Error connecting to backend.`, { status: 502 });
+      console.error(`Error proxying to backend ${route.backend}:`, e.message);
+      return new Response("Error connecting to upstream backend.", { status: 502 });
     }
   },
 };
