@@ -1,0 +1,9 @@
+{
+  "name": "lesspass",
+  "version": "1.0.2",
+  "description": "Edge network VLESS tunnel implemented in Deno Deploy",
+  "private": true,
+  "scripts": {
+    "start": "deno run --allow-net --allow-env --allow-write --allow-read --watch src/index.js"
+  }
+}
