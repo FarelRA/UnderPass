@@ -8,41 +8,32 @@ export default {
   /**
    * Cloudflare Worker fetch handler. This is the main entry point for all
    * requests. It determines whether the request is a WebSocket upgrade
-   * (for data streaming) or an HTTP request.
+   * (for VLESS data streaming) or a standard HTTP request.
    *
-   * @param {Request} request - The incoming request.
-   * @param {object} env - The environment variables.
-   * @returns {Promise<Response>} The response.
+   * @param {Request} request - The incoming request from the client.
+   * @param {object} env - The environment variables configured in the Cloudflare dashboard.
+   * @returns {Promise<Response>} The response to be sent back to the client.
    */
   async fetch(request, env) {
-    // Generate a unique log ID for this request.
     const logId = generateLogId();
-    // Get client IP from Cloudflare headers, default to 'N/A'.
     const clientIP = request.headers.get('CF-Connecting-IP') || 'N/A';
-    // Base log context for this request.
     const logContext = { logId, clientIP, section: 'WORKER' };
-
     try {
       const url = new URL(request.url);
-      const config = getConfig(url, env); // Get configuration.
+      const config = getConfig(url, env);
       const upgradeHeader = request.headers.get('Upgrade');
-
-      // Set the log level from config. *MUST* be done before any logging calls.
       log.setLogLevel(config.LOG_LEVEL);
-
       log.info(logContext, 'REQUEST', 'New request received.');
-
       if (upgradeHeader === 'websocket') {
-        // Handle WebSocket upgrade requests (for data streaming).
         log.info(logContext, 'CONDUIT', 'Handling WebSocket upgrade request.');
         return await handleConduitRequest(request, config, { ...logContext });
       } else {
-        // Handle standard HTTP requests.
         log.info(logContext, 'HTTP', 'Handling HTTP request.');
         return await handleHttpRequest(request, env, url, config, { ...logContext });
       }
     } catch (err) {
-      log.error(logContext, 'ERROR', 'Fetch error:', err);
+      log.error(logContext, 'ERROR', 'Top-level fetch error:', err.stack || err);
+      // Use a standard Response object for errors
       return new Response(err.toString(), { status: 500 });
     }
   },
