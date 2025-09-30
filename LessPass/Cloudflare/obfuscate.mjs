@@ -5,67 +5,71 @@ import path from 'path';
 const SOURCE_DIR = 'src';
 const OUTPUT_DIR = 'dist';
 
-// Defines the mapping of sensitive words to their replacements.
 const OBFUSCATION_MAP = {
-  vless: 'passage',
-  VLESS: 'Passage',
-  proxy: 'conduit',
-  Proxy: 'Conduit',
-  tunnel: 'channel',
-  Tunnel: 'Channel',
+  vless: 'conduit',
+  VLESS: 'Conduit',
+  tunnel: 'passage',
+  Tunnel: 'Passage',
+  proxy: 'channel',
+  Proxy: 'Channel',
 };
 
 /**
- * Main function to orchestrate the obfuscation process.
+ * Applies the obfuscation mapping to a given string.
+ * This is used for both filenames and file content.
+ * @param {string} inputString - The string to transform.
+ * @returns {string} - The transformed string.
+ */
+function applyObfuscation(inputString) {
+  let output = inputString;
+  for (const [original, replacement] of Object.entries(OBFUSCATION_MAP)) {
+    output = output.replaceAll(original, replacement);
+  }
+  return output;
+}
+
+/**
+ * Main function to orchestrate the simplified obfuscation process.
  */
 async function build() {
-  console.log('Starting obfuscation build process...');
+  console.log('Starting simplified obfuscation build process...');
 
   try {
-    // Ensure the output directory exists and is clean
+    // Setup: Clean and create the output directory
     await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
     await fs.mkdir(OUTPUT_DIR, { recursive: true });
 
-    // Use recursive option to find all files in all subdirectories
-    // This will return paths relative to SOURCE_DIR, e.g., ['index.js', 'lib/utils.js']
+    // Recursively find all JavaScript files in the source directory
     const allFiles = await fs.readdir(SOURCE_DIR, { recursive: true });
-
-    // Filter to only include JavaScript files.
     const jsFiles = allFiles.filter((file) => file.endsWith('.js'));
-
-    if (jsFiles.length === 0) {
-      console.warn('No .js files found in the source directory.');
-      return;
-    }
 
     console.log(`Found ${jsFiles.length} JavaScript files to process.`);
 
-    for (const fileRelativePath of jsFiles) {
-      const sourcePath = path.join(SOURCE_DIR, fileRelativePath);
-      const outputPath = path.join(OUTPUT_DIR, fileRelativePath);
+    for (const relativePath of jsFiles) {
+      const sourcePath = path.join(SOURCE_DIR, relativePath);
 
-      console.log(`Processing ${sourcePath}...`);
+      // 1. Determine the new, obfuscated destination path for the file
+      const newRelativePath = applyObfuscation(relativePath);
+      const outputPath = path.join(OUTPUT_DIR, newRelativePath);
 
-      // Ensure the parent directory exists in the output folder before writing
-      const outputParentDir = path.dirname(outputPath);
-      await fs.mkdir(outputParentDir, { recursive: true });
-
+      // 2. Read the original file content
       let content = await fs.readFile(sourcePath, 'utf8');
 
-      // Apply all replacements from the map
-      for (const [original, replacement] of Object.entries(OBFUSCATION_MAP)) {
-        // Use replaceAll to catch all occurrences in the file
-        content = content.replaceAll(original, replacement);
-      }
+      // 3. Obfuscate the entire content in one go
+      // This correctly handles variables, function names, and import paths
+      content = applyObfuscation(content);
 
+      // 4. Write the obfuscated content to the new destination path
+      await fs.mkdir(path.dirname(outputPath), { recursive: true });
       await fs.writeFile(outputPath, content, 'utf8');
-      console.log(`  -> Wrote obfuscated file to ${outputPath}`);
+
+      console.log(`Processed: ${sourcePath}  ->  ${outputPath}`);
     }
 
     console.log('\n✅ Obfuscation build complete.');
   } catch (error) {
     console.error('\n❌ Build process failed:', error);
-    process.exit(1); // Exit with an error code
+    process.exit(1);
   }
 }
 
