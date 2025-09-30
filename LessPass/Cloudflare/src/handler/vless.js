@@ -3,10 +3,10 @@
 // Description: The VLESS Orchestrator. Manages the connection lifecycle.
 // =================================================================
 
-import { logger } from './lib/logger.js';
-import { base64ToArrayBuffer, processVlessHeader, createConsumableStream } from './lib/utils.js';
-import { handleTcpProxy } from './protocol/tcp.js';
-import { handleUdpProxy } from './protocol/udp.js';
+import { logger } from '../lib/logger.js';
+import { base64ToArrayBuffer, processVlessHeader, createConsumableStream } from '../lib/utils.js';
+import { handleTcpProxy } from '../protocol/tcp.js';
+import { handleUdpProxy } from '../protocol/udp.js';
 
 /**
  * Orchestrates an incoming VLESS WebSocket connection.

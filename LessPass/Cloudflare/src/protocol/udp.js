@@ -1,5 +1,5 @@
 // =================================================================
-// File: protocols/udp.js
+// File: protocol/udp.js
 // Description: The UDP Actor. Handles proxying UDP via DNS-over-HTTPS.
 // =================================================================
 
