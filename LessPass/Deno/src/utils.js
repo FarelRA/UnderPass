@@ -49,9 +49,9 @@ export function safeCloseWebSocket(socket, baseLogContext) {
 }
 
 /**
- * Creates a ReadableStream from a WebSocket using Deno's native async
- * iterator pattern. This is the idiomatic Deno approach, resulting in cleaner,
- * more robust code that implicitly handles backpressure.
+ * Creates a ReadableStream from a WebSocket. This is the correct implementation
+ * for Deno, adapting the event-driven WebSocket API (`onmessage`, `onclose`)
+ * to the modern Streams API.
  *
  * @param {WebSocket} webSocket - The Deno WebSocket object.
  * @param {string} earlyDataHeader - The base64-encoded early data.
@@ -59,31 +59,43 @@ export function safeCloseWebSocket(socket, baseLogContext) {
  * @returns {ReadableStream} A ReadableStream of the WebSocket data.
  */
 export function makeReadableWebSocketStream(webSocket, earlyDataHeader, baseLogContext) {
+  let readableStreamCancel = false;
   const logContext = { ...baseLogContext, section: 'UTILS' };
+
   return new ReadableStream({
-    async start(controller) {
+    start(controller) {
+      // Handle incoming messages by enqueuing them into the stream.
+      webSocket.onmessage = (event) => {
+        if (readableStreamCancel) return;
+        controller.enqueue(event.data);
+      };
+
+      // Handle the WebSocket closing by closing the stream.
+      webSocket.onclose = () => {
+        safeCloseWebSocket(webSocket, logContext);
+        if (readableStreamCancel) return;
+        controller.close();
+      };
+
+      // Handle WebSocket errors by propagating them to the stream.
+      webSocket.onerror = (err) => {
+        log.error(logContext, 'makeReadableWebSocketStream:ERROR', 'WebSocket error:', err);
+        controller.error(err);
+      };
+
+      // Process and enqueue early data if it exists.
       const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader, baseLogContext);
       if (error) {
         controller.error(error);
-        return;
       } else if (earlyData) {
         controller.enqueue(earlyData);
       }
-      try {
-        // The `for await...of` loop elegantly handles incoming messages until the socket closes.
-        for await (const message of webSocket) {
-          controller.enqueue(message);
-        }
-        controller.close();
-      } catch (err) {
-        log.error(logContext, 'makeReadableWebSocketStream:ERROR', 'WebSocket reader error:', err.message);
-        controller.error(err);
-      } finally {
-        safeCloseWebSocket(webSocket, baseLogContext);
-      }
     },
+
     cancel(reason) {
+      if (readableStreamCancel) return;
       log.info(logContext, 'makeReadableWebSocketStream:CANCEL', `ReadableStream canceled: ${reason}`);
+      readableStreamCancel = true;
       safeCloseWebSocket(webSocket, baseLogContext);
     },
   });
