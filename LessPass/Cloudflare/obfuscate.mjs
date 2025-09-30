@@ -7,11 +7,14 @@ const OUTPUT_DIR = 'dist';
 
 const OBFUSCATION_MAP = {
   vless: 'conduit',
-  VLESS: 'Conduit',
+  Vless: 'Conduit',
+  VLESS: 'CONDUIT',
   tunnel: 'passage',
   Tunnel: 'Passage',
+  TUNNEL: 'PASSAGE',
   proxy: 'channel',
   Proxy: 'Channel',
+  PROXY: 'CHANNEL',
 };
 
 /**
