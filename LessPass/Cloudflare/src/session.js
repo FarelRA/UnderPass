@@ -1,23 +1,52 @@
 // session.js
-import { createClientTransport } from './transport.js';
+import { createWebSocketTransport } from './transport.js';
 import { processVlessHeader, createVlessResponseTransformStream } from './vless.js';
 import { TCPHandler, UDPHandler } from './handlers.js';
 import { pipeStreams } from './pipe.js';
 import { log } from './logs.js';
 
 /**
- * Handles the entire VLESS session from WebSocket upgrade to termination.
- * This is the main orchestrator.
+ * Creates the WebSocket pair, immediately returns the 101 Response,
+ * and launches the asynchronous session processing in the background.
+ *
  * @param {Request} request The incoming WebSocket upgrade request.
  * @param {object} config The application configuration.
  * @param {object} logContext The logging context.
- * @returns {Promise<Response>} A WebSocket response to complete the upgrade.
+ * @returns {Response} A WebSocket upgrade response.
  */
-export async function handleSession(request, config, logContext) {
+export function handleSession(request, config, logContext) {
   const sessionLogContext = { ...logContext, section: 'SESSION' };
 
-  // 1. Create a transport from the client's WebSocket connection.
-  const { client, transport: clientTransport } = createClientTransport(request, sessionLogContext);
+  const pair = new WebSocketPair();
+  const [client, server] = Object.values(pair);
+
+  // Launch the async processing, but do not await it.
+  // This is the "fire-and-forget" pattern. The runtime will keep the
+  // worker alive because of the active server socket.
+  processSession(server, request, config, sessionLogContext).catch((err) => {
+    log.error(sessionLogContext, 'PROCESS_SESSION_UNHANDLED', 'Unhandled error in session processing:', err.stack || err);
+    // Attempt to gracefully close the socket on a catastrophic failure.
+    if (server.readyState === 1) {
+      server.close(1011, 'Internal Server Error');
+    }
+  });
+
+  // Return the 101 response immediately to complete the handshake.
+  return new Response(null, {
+    status: 101,
+    webSocket: client,
+  });
+}
+
+/**
+ * Handles the server-side of the WebSocket, running asynchronously.
+ * This contains the core VLESS session logic.
+ */
+async function processSession(server, request, config, sessionLogContext) {
+  server.accept();
+
+  // 1. Create a transport from the server-side WebSocket.
+  const clientTransport = createWebSocketTransport(server, request, sessionLogContext);
   const clientReader = clientTransport.readable.getReader();
 
   try {
@@ -25,7 +54,7 @@ export async function handleSession(request, config, logContext) {
     const { done, value: firstChunk } = await clientReader.read();
     if (done || !firstChunk) {
       log.warn(sessionLogContext, 'HEADER', 'Client disconnected before sending header.');
-      return new Response(null, { status: 101, webSocket: client }); // Still need to complete WS upgrade
+      return; // Exit peacefully
     }
 
     const { hasError, message, addressRemote, portRemote, rawDataIndex, isUDP, streamVersion } = processVlessHeader(
@@ -57,7 +86,10 @@ export async function handleSession(request, config, logContext) {
               abort: (reason) => controller.error(reason),
             })
           )
-          .catch((err) => controller.error(err));
+          .catch((err) => {
+            log.error(sessionLogContext, 'PIPE_RECONSTITUTE', 'Error piping leftover stream', err);
+            controller.error(err);
+          });
       },
     });
     clientTransport.readable = reconstitutedReadable;
@@ -79,11 +111,8 @@ export async function handleSession(request, config, logContext) {
     log.info(sessionLogContext, 'PIPE', 'Establishing bidirectional pipe.');
     pipeStreams(clientTransport, remoteTransport, sessionLogContext);
   } catch (err) {
-    // Ensure the WebSocket is closed on error.
     log.error(sessionLogContext, 'ERROR', 'Session failed:', err.stack || err);
-    if (client.readyState === 1) client.close(1011, err.message);
+    // Ensure the WebSocket is closed on error.
+    if (server.readyState === 1) server.close(1011, err.message);
   }
-
-  // Complete the WebSocket upgrade.
-  return new Response(null, { status: 101, webSocket: client });
 }
