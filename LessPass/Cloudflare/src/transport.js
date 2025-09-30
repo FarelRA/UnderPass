@@ -11,11 +11,16 @@ import { log } from './logs.js';
 export function createWebSocketTransport(server, request, logContext) {
   // Handle early data sent in the Sec-WebSocket-Protocol header
   const earlyDataHeader = request.headers.get('Sec-WebSocket-Protocol') || '';
-  const earlyData = base64ToArrayBuffer(earlyDataHeader.split(', ')[1] || '', logContext);
+
+  // The VLESS client uses this header to tunnel the first data packet.
+  // It is a single Base64 value, not a comma-separated list of protocols.
+  // We must not split it.
+  const earlyData = base64ToArrayBuffer(earlyDataHeader, logContext);
 
   const readable = new ReadableStream({
     start(controller) {
       if (earlyData) {
+        log.debug({ ...logContext, section: 'TRANSPORT' }, 'EARLY_DATA', `Enqueuing ${earlyData.byteLength} bytes of early data.`);
         controller.enqueue(earlyData);
       }
       server.addEventListener('message', (event) => controller.enqueue(event.data));
@@ -47,7 +52,9 @@ export function createWebSocketTransport(server, request, logContext) {
 function base64ToArrayBuffer(base64Str, logContext) {
   if (!base64Str) return null;
   try {
-    const binaryStr = atob(base64Str.replace(/-/g, '+').replace(/_/g, '/'));
+    // VLESS clients use URL-safe Base64, so we need to replace '-' and '_'
+    const base64 = base64Str.replace(/-/g, '+').replace(/_/g, '/');
+    const binaryStr = atob(base64);
     const len = binaryStr.length;
     const bytes = new Uint8Array(len);
     for (let i = 0; i < len; i++) {
