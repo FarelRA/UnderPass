@@ -18,8 +18,6 @@ export function handleConduitRequest(request, config, logContext) {
     .pipeTo(
       new WritableStream({
         async write(chunk) {
-          // Deno's WebSocket message event sometimes provides a Uint8Array,
-          // but our stream processing expects an ArrayBuffer. Ensure consistency.
           const buffer = chunk instanceof ArrayBuffer ? chunk : chunk.buffer;
           if (isDns && udpStreamWrite) {
             return udpStreamWrite(buffer);
@@ -64,7 +62,11 @@ export function handleConduitRequest(request, config, logContext) {
             return;
           }
           log.info(conduitLogContext, 'TCP', 'Handling TCP request.');
-          handleTCPOutBound(remoteSocketWrapper, addressRemote, portRemote, rawClientData, webSocket, streamResponseHeader, config, {
+
+          // We MUST await the entire TCP setup process. Otherwise, this `write` function
+          // returns immediately, creating a race condition where the client WebSocket
+          // might close before the remote TCP connection is established, leading to a "BadResource" error.
+          await handleTCPOutBound(remoteSocketWrapper, addressRemote, portRemote, rawClientData, webSocket, streamResponseHeader, config, {
             ...conduitLogContext,
           });
         },
@@ -111,15 +113,17 @@ async function handleTCPOutBound(
     } catch (error) {
       log.error(tcpLogContext, 'ERROR', `Error connecting to ${address}:${port}:`, error.message);
       safeCloseWebSocket(webSocket, logContext);
-      return null; // Return null on failure for explicit checking.
+      return null;
     }
   }
   const tcpSocket = await connectAndWrite(addressRemote, portRemote);
   if (!tcpSocket) {
-    // If the connection failed, log and stop.
     log.warn(tcpLogContext, 'ABORT', 'TCP connection failed, aborting pipe setup.');
     return;
   }
+  // This function sets up the pipe but does not need to be awaited itself, as it
+  // will run in the background for the lifetime of the connection. The important
+  // part is that it's only called AFTER the connection is established.
   remoteSocketToWS(tcpSocket, webSocket, streamResponseHeader, { ...tcpLogContext });
 }
 
@@ -130,13 +134,13 @@ async function handleTCPOutBound(
 async function remoteSocketToWS(remoteSocket, webSocket, streamResponseHeader, logContext) {
   const wsLogContext = { ...logContext, section: 'CONDUIT:WS' };
   let streamHeaderSent = false;
+  // Use a .catch() to prevent unhandled promise rejection on pipe failure.
   await remoteSocket.readable
     .pipeTo(
       new WritableStream({
         write(chunk) {
           if (webSocket.readyState === WS_READY_STATE_OPEN) {
             if (!streamHeaderSent) {
-              // IMPROVEMENT: Use direct Uint8Array.set for efficient buffer concatenation.
               const combinedBuffer = new Uint8Array(streamResponseHeader.length + chunk.length);
               combinedBuffer.set(streamResponseHeader, 0);
               combinedBuffer.set(chunk, streamResponseHeader.length);
@@ -204,7 +208,6 @@ async function handleUDPOutBound(webSocket, streamResponseHeader, config, logCon
             if (webSocket.readyState === WS_READY_STATE_OPEN) {
               log.info(udpLogContext, 'UDP:DOH:SUCCESS', `DoH query successful. Length: ${udpSize}`);
               let dataToSend;
-              // IMPROVEMENT: Use direct Uint8Array.set for efficient buffer concatenation.
               if (isStreamHeaderSent) {
                 dataToSend = new Uint8Array(udpSizeBuffer.length + dnsQueryResult.byteLength);
                 dataToSend.set(udpSizeBuffer, 0);
