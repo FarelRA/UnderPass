@@ -1,8 +1,12 @@
-// index.js
-import { getConfig } from './configs.js';
-import { log, generateLogId } from './logs.js';
-import { handleSession } from './session.js';
-import { handleHttpRequest } from './http.js';
+// =================================================================
+// File: index.js
+// Description: Main Cloudflare Worker entry point.
+// =================================================================
+
+import { initializeConfig } from './lib/config.js';
+import { logger, generateLogId } from './lib/logger.js';
+import { handleHttpRequest } from './handler/http.js';
+import { handleVlessRequest } from './handler/vless.js';
 
 export default {
   /**
@@ -15,19 +19,20 @@ export default {
 
     try {
       const url = new URL(request.url);
-      const config = getConfig(url, env);
-      log.setLogLevel(config.LOG_LEVEL);
+      initializeConfig(url, env);
+      logger.setLogLevel(config.LOG_LEVEL);
 
-      if (request.headers.get('Upgrade') === 'websocket') {
-        log.info(logContext, 'SESSION', 'Handling WebSocket upgrade request.');
-        return handleSession(request, config, logContext);
+      const upgradeHeader = request.headers.get('Upgrade');
+      if (upgradeHeader === 'websocket') {
+        logger.info(logContext, 'ROUTING', 'Handling WebSocket (VLESS) request.');
+        return await handleVlessRequest(request, logContext);
       } else {
-        log.info(logContext, 'HTTP', 'Handling HTTP request.');
-        return handleHttpRequest(request, env, url, config, logContext);
+        logger.info(logContext, 'ROUTING', 'Handling standard HTTP request.');
+        return await handleHttpRequest(request, env, logContext);
       }
     } catch (err) {
-      log.error(logContext, 'ERROR', 'Top-level fetch error:', err.stack || err);
-      return new Response(err.toString(), { status: 500 });
+      logger.error(logContext, 'FATAL', 'Unhandled top-level error:', err.stack || err);
+      return new Response('Internal Server Error', { status: 500 });
     }
   },
 };
