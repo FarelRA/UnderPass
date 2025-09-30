@@ -1,210 +1,39 @@
 // utils.js
-import { WS_READY_STATE_CLOSING, WS_READY_STATE_OPEN, byteToHex } from './configs.js';
-import { log } from './logs.js';
+import { byteToHex } from './configs.js';
 
-/**
- * Creates a helper object to read sequential data from a buffer.
- * This simplifies parsing logic by managing the current offset automatically,
- * making the code cleaner and less error-prone than manual index tracking.
- * @param {ArrayBuffer} buffer The buffer to read from.
- * @returns {object} A reader object with methods to read data types.
- */
-function createBufferReader(buffer) {
-  const view = new DataView(buffer);
+export function createBufferReader(buffer) {
+  const view = new DataView(buffer.buffer, buffer.byteOffset, buffer.byteLength);
   let offset = 0;
   return {
     get offset() {
       return offset;
     },
     readUint8() {
-      const value = view.getUint8(offset);
+      const v = view.getUint8(offset);
       offset += 1;
-      return value;
+      return v;
     },
     readUint16() {
-      const value = view.getUint16(offset);
+      const v = view.getUint16(offset);
       offset += 2;
-      return value;
+      return v;
     },
-    readBytes(length) {
-      const value = new Uint8Array(buffer, offset, length);
-      offset += length;
-      return value;
+    readBytes(len) {
+      const v = new Uint8Array(buffer.buffer, buffer.byteOffset + offset, len);
+      offset += len;
+      return v;
     },
-    skip(length) {
-      offset += length;
+    skip(len) {
+      offset += len;
     },
   };
 }
 
-/**
- * Safely closes a WebSocket. It checks the ready state before attempting to
- * close to prevent "WebSocket is not open" errors.
- *
- * @param {WebSocket} socket - The WebSocket to close.
- * @param {object} baseLogContext - The base logging context.
- */
-export function safeCloseWebSocket(socket, baseLogContext) {
-  const logContext = { ...baseLogContext, section: 'UTILS' };
-  try {
-    if (socket.readyState === WS_READY_STATE_OPEN || socket.readyState === WS_READY_STATE_CLOSING) {
-      socket.close();
-    }
-  } catch (error) {
-    log.error(logContext, 'safeCloseWebSocket:ERROR', 'Error during WebSocket close:', error);
-  }
-}
-
-/**
- * Creates a ReadableStream from a WebSocket. This function adapts the
- * event-driven WebSocket API to the modern Streams API, allowing data to be
- * piped and processed elegantly.
- *
- * @param {WebSocket} webSocketServer - The WebSocket server object from WebSocketPair.
- * @param {string} earlyDataHeader - The base64-encoded early data from the Sec-WebSocket-Protocol header.
- * @param {object} baseLogContext - The base logging context.
- * @returns {ReadableStream} A ReadableStream representing the WebSocket data.
- */
-export function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, baseLogContext) {
-  let readableStreamCancel = false;
-  const logContext = { ...baseLogContext, section: 'UTILS' };
-  return new ReadableStream({
-    start(controller) {
-      webSocketServer.addEventListener('message', (event) => {
-        if (readableStreamCancel) return;
-        controller.enqueue(event.data);
-      });
-      webSocketServer.addEventListener('close', () => {
-        safeCloseWebSocket(webSocketServer, logContext);
-        if (readableStreamCancel) return;
-        controller.close();
-      });
-      webSocketServer.addEventListener('error', (err) => {
-        log.error(logContext, 'makeReadableWebSocketStream:ERROR', 'WebSocket error:', err, err.message);
-        controller.error(err);
-      });
-      const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader, baseLogContext);
-      if (error) {
-        controller.error(error);
-      } else if (earlyData) {
-        controller.enqueue(earlyData);
-      }
-    },
-    pull() {
-      /* No backpressure implementation needed for this use case */
-    },
-    cancel(reason) {
-      if (readableStreamCancel) return;
-      log.info(logContext, 'makeReadableWebSocketStream:CANCEL', `ReadableStream canceled: ${reason}`);
-      readableStreamCancel = true;
-      safeCloseWebSocket(webSocketServer, baseLogContext);
-    },
-  });
-}
-
-/**
- * Processes the VLESS protocol header from a buffer. This refactored version
- * uses a BufferReader for improved readability and maintainability.
- *
- * @param {ArrayBuffer} streamBuffer - The buffer containing the protocol header.
- * @param {string} userID - The expected user ID for validation.
- * @returns {object} An object containing the extracted destination info, or an error.
- */
-export function processStreamHeader(streamBuffer, userID) {
-  if (streamBuffer.byteLength < 24) {
-    return { hasError: true, message: 'Invalid data: insufficient length.' };
-  }
-  const reader = createBufferReader(streamBuffer);
-  const streamVersion = reader.readBytes(1);
-  const userIdBuffer = reader.readBytes(16);
-  if (stringifyUUID(userIdBuffer) !== userID) {
-    return { hasError: true, message: 'Invalid user ID.' };
-  }
-  const optLength = reader.readUint8();
-  reader.skip(optLength); // Skip the variable-length options field
-  const command = reader.readUint8();
-  let isUDP = false;
-  if (command === 2) {
-    isUDP = true;
-  } else if (command !== 1) {
-    return { hasError: true, message: `Unsupported command: ${command}. TCP (0x01) and UDP (0x02) are supported.` };
-  }
-  const portRemote = reader.readUint16();
-  const addressType = reader.readUint8();
-  let addressValue = '';
-  switch (addressType) {
-    case 1: // IPv4
-      addressValue = reader.readBytes(4).join('.');
-      break;
-    case 2: // Domain Name
-      const domainLength = reader.readUint8();
-      addressValue = new TextDecoder().decode(reader.readBytes(domainLength));
-      break;
-    case 3: // IPv6
-      const ipv6Bytes = reader.readBytes(16);
-      const ipv6View = new DataView(ipv6Bytes.buffer, ipv6Bytes.byteOffset, ipv6Bytes.byteLength);
-      const ipv6 = Array.from({ length: 8 }, (_, i) => ipv6View.getUint16(i * 2).toString(16));
-      addressValue = `[${ipv6.join(':')}]`;
-      break;
-    default:
-      return { hasError: true, message: `Invalid address type: ${addressType}.` };
-  }
-  if (!addressValue) {
-    return { hasError: true, message: `Address value is empty for address type: ${addressType}.` };
-  }
-  return {
-    hasError: false,
-    addressRemote: addressValue,
-    addressType,
-    portRemote,
-    rawDataIndex: reader.offset, // The new index is the reader's final offset.
-    streamVersion: streamVersion,
-    isUDP,
-  };
-}
-
-/**
- * Decodes a base64 string to an ArrayBuffer. It handles URL-safe base64
- * encoding (replacing '-' and '_') and catches decoding errors.
- *
- * @param {string} base64Str - The base64-encoded string.
- * @param {object} baseLogContext - The base logging context.
- * @returns {object} An object containing the decoded ArrayBuffer or an error.
- */
-export function base64ToArrayBuffer(base64Str, baseLogContext) {
-  const logContext = { ...baseLogContext, section: 'UTILS' };
-  if (!base64Str) {
-    return { earlyData: null, error: null };
-  }
-  try {
-    base64Str = base64Str.replace(/-/g, '+').replace(/_/g, '/');
-    const decode = atob(base64Str);
-    const arryBuffer = Uint8Array.from(decode, (c) => c.charCodeAt(0));
-    return { earlyData: arryBuffer.buffer, error: null };
-  } catch (error) {
-    log.error(logContext, 'base64ToArrayBuffer:ERROR', 'Error in base64ToArrayBuffer', error);
-    return { earlyData: null, error };
-  }
-}
-
-/**
- * Checks if a given string is a valid UUID (v4).
- *
- * @param {string} uuid - The string to check.
- * @returns {boolean} True if the string is a valid UUID, false otherwise.
- */
 export function isValidUUID(uuid) {
   const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
   return uuidRegex.test(uuid);
 }
 
-/**
- * Converts a Uint8Array (or a portion of it) to a UUID string.
- *
- * @param {Uint8Array} arr - The Uint8Array containing the UUID bytes.
- * @param {number} [offset=0] - The offset within the array to start from.
- * @returns {string} The formatted UUID string.
- */
 export function stringifyUUID(arr, offset = 0) {
   const uuid =
     byteToHex[arr[offset]] +
@@ -228,7 +57,7 @@ export function stringifyUUID(arr, offset = 0) {
     byteToHex[arr[offset + 14]] +
     byteToHex[arr[offset + 15]];
   if (!isValidUUID(uuid)) {
-    throw TypeError('Stringified UUID is invalid: ' + uuid);
+    throw TypeError('Stringified UUID is invalid');
   }
   return uuid;
 }
