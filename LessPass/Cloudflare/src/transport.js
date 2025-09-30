@@ -2,16 +2,13 @@
 import { log } from './logs.js';
 
 /**
- * Creates a standard Transport object from a client WebSocket connection.
- * @param {Request} request The incoming WebSocket upgrade request.
+ * Creates a standard Transport object from an accepted server-side WebSocket.
+ * @param {WebSocket} server The server-side WebSocket from a WebSocketPair.
+ * @param {Request} request The original upgrade request, for early data.
  * @param {object} logContext The logging context.
- * @returns {{ client: WebSocket, transport: { readable: ReadableStream, writable: WritableStream } }}
+ * @returns {{ readable: ReadableStream, writable: WritableStream }}
  */
-export function createClientTransport(request, logContext) {
-  const wsPair = new WebSocketPair();
-  const [client, server] = Object.values(wsPair);
-  server.accept();
-
+export function createWebSocketTransport(server, request, logContext) {
   // Handle early data sent in the Sec-WebSocket-Protocol header
   const earlyDataHeader = request.headers.get('Sec-WebSocket-Protocol') || '';
   const earlyData = base64ToArrayBuffer(earlyDataHeader.split(', ')[1] || '', logContext);
@@ -26,7 +23,7 @@ export function createClientTransport(request, logContext) {
       server.addEventListener('error', (err) => controller.error(err));
     },
     cancel() {
-      if (server.readyState === 1) server.close(1000);
+      if (server.readyState === 1) server.close(1000, 'Stream canceled');
     },
   });
 
@@ -37,14 +34,14 @@ export function createClientTransport(request, logContext) {
       }
     },
     close() {
-      if (server.readyState === 1) server.close(1000);
+      if (server.readyState === 1) server.close(1000, 'Stream closed');
     },
     abort(reason) {
-      if (server.readyState === 1) server.close(1011, reason);
+      if (server.readyState === 1) server.close(1011, String(reason));
     },
   });
 
-  return { client, transport: { readable, writable } };
+  return { readable, writable };
 }
 
 function base64ToArrayBuffer(base64Str, logContext) {
