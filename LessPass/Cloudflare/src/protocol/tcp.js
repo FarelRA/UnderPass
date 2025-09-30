@@ -1,4 +1,8 @@
-// = a/protocols/tcp.js
+// =================================================================
+// File: protocol/tcp.js
+// Description: The TCP Actor. Handles proxying TCP connections.
+// =================================================================
+
 import { connect } from 'cloudflare:sockets';
 import { logger } from '../lib/logger.js';
 import { safeCloseWebSocket, WS_READY_STATE } from '../lib/utils.js';

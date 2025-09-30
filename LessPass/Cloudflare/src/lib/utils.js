@@ -3,8 +3,8 @@
 // Description: Shared utilities for VLESS parsing, stream manipulation, and WebSockets.
 // =================================================================
 
-import { byteToHex, config } from './config.js';
-import { logger } from './logger.js';
+import { byteToHex, config } from '../lib/config.js';
+import { logger } from '../lib/logger.js';
 
 export const WS_READY_STATE = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 
