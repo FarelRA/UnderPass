@@ -6,7 +6,6 @@ const SOURCE_DIR = 'src';
 const OUTPUT_DIR = 'dist';
 
 // Defines the mapping of sensitive words to their replacements.
-// We use thematic but neutral synonyms to maintain some readability if needed.
 const OBFUSCATION_MAP = {
   vless: 'passage',
   VLESS: 'Passage',
@@ -27,15 +26,29 @@ async function build() {
     await fs.rm(OUTPUT_DIR, { recursive: true, force: true });
     await fs.mkdir(OUTPUT_DIR, { recursive: true });
 
-    const files = await fs.readdir(SOURCE_DIR);
+    // Use recursive option to find all files in all subdirectories
+    // This will return paths relative to SOURCE_DIR, e.g., ['index.js', 'lib/utils.js']
+    const allFiles = await fs.readdir(SOURCE_DIR, { recursive: true });
 
-    for (const file of files) {
-      if (!file.endsWith('.js')) continue; // Only process JavaScript files
+    // Filter to only include JavaScript files.
+    const jsFiles = allFiles.filter((file) => file.endsWith('.js'));
 
-      const sourcePath = path.join(SOURCE_DIR, file);
-      const outputPath = path.join(OUTPUT_DIR, file);
+    if (jsFiles.length === 0) {
+      console.warn('No .js files found in the source directory.');
+      return;
+    }
+
+    console.log(`Found ${jsFiles.length} JavaScript files to process.`);
+
+    for (const fileRelativePath of jsFiles) {
+      const sourcePath = path.join(SOURCE_DIR, fileRelativePath);
+      const outputPath = path.join(OUTPUT_DIR, fileRelativePath);
 
       console.log(`Processing ${sourcePath}...`);
+
+      // Ensure the parent directory exists in the output folder before writing
+      const outputParentDir = path.dirname(outputPath);
+      await fs.mkdir(outputParentDir, { recursive: true });
 
       let content = await fs.readFile(sourcePath, 'utf8');
 
