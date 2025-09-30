@@ -1,10 +1,12 @@
 {
   "name": "lesspass",
-  "version": "1.0.2",
-  "description": "Edge network VLESS tunnel implemented in Cloudflare Workers",
+  "version": "1.0.9",
+  "description": "Edge network passage channel implemented in Cloudflare Workers",
   "private": true,
+  "type": "module",
   "scripts": {
-    "deploy": "wrangler deploy",
+    "build": "node obfuscate.mjs",
+    "deploy": "npm run build && wrangler deploy",
     "dev": "wrangler dev"
   },
   "devDependencies": {
