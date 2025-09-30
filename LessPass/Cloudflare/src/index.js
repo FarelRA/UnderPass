@@ -3,7 +3,7 @@
 // Description: Main Cloudflare Worker entry point.
 // =================================================================
 
-import { initializeConfig } from './lib/config.js';
+import { config, initializeConfig } from './lib/config.js';
 import { logger, generateLogId } from './lib/logger.js';
 import { handleHttpRequest } from './handler/http.js';
 import { handleVlessRequest } from './handler/vless.js';
