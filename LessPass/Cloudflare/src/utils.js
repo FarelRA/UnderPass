@@ -3,8 +3,43 @@ import { WS_READY_STATE_CLOSING, WS_READY_STATE_OPEN, byteToHex } from './config
 import { log } from './logs.js';
 
 /**
- * Safely closes a WebSocket. Checks the ready state before attempting to close
- * to prevent errors. Catches and logs any errors that occur during closing.
+ * Creates a helper object to read sequential data from a buffer.
+ * This simplifies parsing logic by managing the current offset automatically,
+ * making the code cleaner and less error-prone than manual index tracking.
+ * @param {ArrayBuffer} buffer The buffer to read from.
+ * @returns {object} A reader object with methods to read data types.
+ */
+function createBufferReader(buffer) {
+  const view = new DataView(buffer);
+  let offset = 0;
+  return {
+    get offset() {
+      return offset;
+    },
+    readUint8() {
+      const value = view.getUint8(offset);
+      offset += 1;
+      return value;
+    },
+    readUint16() {
+      const value = view.getUint16(offset);
+      offset += 2;
+      return value;
+    },
+    readBytes(length) {
+      const value = new Uint8Array(buffer, offset, length);
+      offset += length;
+      return value;
+    },
+    skip(length) {
+      offset += length;
+    },
+  };
+}
+
+/**
+ * Safely closes a WebSocket. It checks the ready state before attempting to
+ * close to prevent "WebSocket is not open" errors.
  *
  * @param {WebSocket} socket - The WebSocket to close.
  * @param {object} baseLogContext - The base logging context.
@@ -21,159 +56,116 @@ export function safeCloseWebSocket(socket, baseLogContext) {
 }
 
 /**
- * Creates a ReadableStream from a WebSocket. This handles incoming messages,
- * WebSocket close events, errors, and optionally processes early data.
+ * Creates a ReadableStream from a WebSocket. This function adapts the
+ * event-driven WebSocket API to the modern Streams API, allowing data to be
+ * piped and processed elegantly.
  *
- * @param {WebSocket} webSocketServer - The WebSocket server.
- * @param {string} earlyDataHeader - The base64-encoded early data header.
+ * @param {WebSocket} webSocketServer - The WebSocket server object from WebSocketPair.
+ * @param {string} earlyDataHeader - The base64-encoded early data from the Sec-WebSocket-Protocol header.
  * @param {object} baseLogContext - The base logging context.
  * @returns {ReadableStream} A ReadableStream representing the WebSocket data.
  */
 export function makeReadableWebSocketStream(webSocketServer, earlyDataHeader, baseLogContext) {
-  let readableStreamCancel = false; // Flag to prevent further actions after stream cancellation.
+  let readableStreamCancel = false;
   const logContext = { ...baseLogContext, section: 'UTILS' };
-  const stream = new ReadableStream({
+  return new ReadableStream({
     start(controller) {
-      // Handle incoming messages.
       webSocketServer.addEventListener('message', (event) => {
-        if (readableStreamCancel) return; // Ignore messages if stream is canceled.
+        if (readableStreamCancel) return;
         controller.enqueue(event.data);
       });
-
-      // Handle WebSocket close events.
       webSocketServer.addEventListener('close', () => {
-        safeCloseWebSocket(webSocketServer); // Safely close the WebSocket.
-        if (readableStreamCancel) return; // Ignore if stream is canceled.
-        controller.close(); // Close the ReadableStream.
+        safeCloseWebSocket(webSocketServer, logContext);
+        if (readableStreamCancel) return;
+        controller.close();
       });
-
-      // Handle WebSocket errors.
       webSocketServer.addEventListener('error', (err) => {
         log.error(logContext, 'makeReadableWebSocketStream:ERROR', 'WebSocket error:', err, err.message);
-        controller.error(err); // Signal an error in the ReadableStream.
+        controller.error(err);
       });
-
-      // Process early data, if any.
       const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader, baseLogContext);
       if (error) {
-        controller.error(error); // If early data decoding fails, signal an error.
+        controller.error(error);
       } else if (earlyData) {
-        controller.enqueue(earlyData); // Enqueue the decoded early data.
+        controller.enqueue(earlyData);
       }
     },
-
-    pull(controller) {
-      // Implement backpressure handling if needed. Currently, no action required.
+    pull() {
+      /* No backpressure implementation needed for this use case */
     },
-
     cancel(reason) {
-      // Handle stream cancellation.
-      if (readableStreamCancel) return; // Prevent duplicate cancellations.
+      if (readableStreamCancel) return;
       log.info(logContext, 'makeReadableWebSocketStream:CANCEL', `ReadableStream canceled: ${reason}`);
-      readableStreamCancel = true; // Set the cancellation flag.
-      safeCloseWebSocket(webSocketServer, baseLogContext); // Close the WebSocket.
+      readableStreamCancel = true;
+      safeCloseWebSocket(webSocketServer, baseLogContext);
     },
   });
-  return stream;
 }
 
 /**
- * Processes the protocol header from a buffer. Extracts information such as
- * the remote address, port, and whether it's a UDP connection. Performs
- * validation to ensure the header is well-formed and the user ID is valid.
+ * Processes the VLESS protocol header from a buffer. This refactored version
+ * uses a BufferReader for improved readability and maintainability.
  *
  * @param {ArrayBuffer} streamBuffer - The buffer containing the protocol header.
- * @param {string} userID - The expected user ID.
- * @returns {object} An object containing the extracted information, or an error.
+ * @param {string} userID - The expected user ID for validation.
+ * @returns {object} An object containing the extracted destination info, or an error.
  */
 export function processStreamHeader(streamBuffer, userID) {
-  // Validate the minimum buffer length (version + UUID + optLength + command + port + addressType).
   if (streamBuffer.byteLength < 24) {
-    return {
-      hasError: true,
-      message: 'Invalid data: insufficient length.',
-    };
+    return { hasError: true, message: 'Invalid data: insufficient length.' };
   }
-
-  // Extract components from the protocol header.
-  const version = new Uint8Array(streamBuffer.slice(0, 1));
-  const userIdBuffer = new Uint8Array(streamBuffer.slice(1, 17));
-  let isUDP = false;
-
-  // Validate the user ID.
+  const reader = createBufferReader(streamBuffer);
+  const streamVersion = reader.readBytes(1);
+  const userIdBuffer = reader.readBytes(16);
   if (stringifyUUID(userIdBuffer) !== userID) {
     return { hasError: true, message: 'Invalid user ID.' };
   }
-
-  // Read option data length, and then command.
-  const optLength = new Uint8Array(streamBuffer.slice(17, 18))[0];
-  const command = new Uint8Array(streamBuffer.slice(18 + optLength, 18 + optLength + 1))[0];
-
-  // Check if it's a UDP connection (command 0x02).
+  const optLength = reader.readUint8();
+  reader.skip(optLength); // Skip the variable-length options field
+  const command = reader.readUint8();
+  let isUDP = false;
   if (command === 2) {
     isUDP = true;
   } else if (command !== 1) {
-    // Only TCP (0x01) and UDP (0x02) are supported.
     return { hasError: true, message: `Unsupported command: ${command}. TCP (0x01) and UDP (0x02) are supported.` };
   }
-
-  // Extract the remote port.
-  const portIndex = 18 + optLength + 1;
-  const portBuffer = streamBuffer.slice(portIndex, portIndex + 2);
-  const portRemote = new DataView(portBuffer).getUint16(0);
-
-  // Extract the address type and value.
-  let addressIndex = portIndex + 2;
-  const addressType = new Uint8Array(streamBuffer.slice(addressIndex, addressIndex + 1))[0];
-  let addressLength = 0;
-  let addressValueIndex = addressIndex + 1;
+  const portRemote = reader.readUint16();
+  const addressType = reader.readUint8();
   let addressValue = '';
-
-  // Determine the address length and value based on address type.
   switch (addressType) {
     case 1: // IPv4
-      addressLength = 4;
-      addressValue = new Uint8Array(streamBuffer.slice(addressValueIndex, addressValueIndex + addressLength)).join('.');
+      addressValue = reader.readBytes(4).join('.');
       break;
     case 2: // Domain Name
-      addressLength = new Uint8Array(streamBuffer.slice(addressValueIndex, addressValueIndex + 1))[0];
-      addressValueIndex += 1;
-      addressValue = new TextDecoder().decode(streamBuffer.slice(addressValueIndex, addressValueIndex + addressLength));
+      const domainLength = reader.readUint8();
+      addressValue = new TextDecoder().decode(reader.readBytes(domainLength));
       break;
     case 3: // IPv6
-      addressLength = 16;
-      const dataView = new DataView(streamBuffer.slice(addressValueIndex, addressValueIndex + addressLength));
-      const ipv6 = [];
-      for (let i = 0; i < 8; i++) {
-        ipv6.push(dataView.getUint16(i * 2).toString(16));
-      }
-      // Wrap the IPv6 address in square brackets.
+      const ipv6Bytes = reader.readBytes(16);
+      const ipv6View = new DataView(ipv6Bytes.buffer, ipv6Bytes.byteOffset, ipv6Bytes.byteLength);
+      const ipv6 = Array.from({ length: 8 }, (_, i) => ipv6View.getUint16(i * 2).toString(16));
       addressValue = `[${ipv6.join(':')}]`;
       break;
     default:
       return { hasError: true, message: `Invalid address type: ${addressType}.` };
   }
-
-  // Ensure an address value was extracted.
   if (!addressValue) {
     return { hasError: true, message: `Address value is empty for address type: ${addressType}.` };
   }
-
-  // Return the processed header information.
   return {
     hasError: false,
     addressRemote: addressValue,
     addressType,
     portRemote,
-    rawDataIndex: addressValueIndex + addressLength, // Index of data after the header.
-    streamVersion: version,
+    rawDataIndex: reader.offset, // The new index is the reader's final offset.
+    streamVersion: streamVersion,
     isUDP,
   };
 }
 
 /**
- * Decodes a base64 string to an ArrayBuffer. Handles URL-safe base64 encoding
- * (with '-' and '_') and catches decoding errors.
+ * Decodes a base64 string to an ArrayBuffer. It handles URL-safe base64
+ * encoding (replacing '-' and '_') and catches decoding errors.
  *
  * @param {string} base64Str - The base64-encoded string.
  * @param {object} baseLogContext - The base logging context.
@@ -182,19 +174,16 @@ export function processStreamHeader(streamBuffer, userID) {
 export function base64ToArrayBuffer(base64Str, baseLogContext) {
   const logContext = { ...baseLogContext, section: 'UTILS' };
   if (!base64Str) {
-    return { earlyData: null, error: null }; // Return null if input is empty.
+    return { earlyData: null, error: null };
   }
   try {
-    // Convert URL-safe base64 to standard base64.
     base64Str = base64Str.replace(/-/g, '+').replace(/_/g, '/');
-    // Decode the base64 string.
     const decode = atob(base64Str);
-    // Convert the decoded string to a Uint8Array.
     const arryBuffer = Uint8Array.from(decode, (c) => c.charCodeAt(0));
     return { earlyData: arryBuffer.buffer, error: null };
   } catch (error) {
     log.error(logContext, 'base64ToArrayBuffer:ERROR', 'Error in base64ToArrayBuffer', error);
-    return { earlyData: null, error }; // Return the error if decoding fails.
+    return { earlyData: null, error };
   }
 }
 
@@ -212,10 +201,9 @@ export function isValidUUID(uuid) {
 /**
  * Converts a Uint8Array (or a portion of it) to a UUID string.
  *
- * @param {Uint8Array} arr - The Uint8Array.
+ * @param {Uint8Array} arr - The Uint8Array containing the UUID bytes.
  * @param {number} [offset=0] - The offset within the array to start from.
- * @returns {string} The UUID string.
- * @throws {TypeError} If the resulting UUID string is invalid.
+ * @returns {string} The formatted UUID string.
  */
 export function stringifyUUID(arr, offset = 0) {
   const uuid =

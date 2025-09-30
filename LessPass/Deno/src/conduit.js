@@ -4,216 +4,235 @@ import { WS_READY_STATE_OPEN } from './configs.js';
 import { log } from './logs.js';
 
 /**
- * Handles the WebSocket connection and VLESS protocol logic.
- * @param {WebSocket} webSocket - The client WebSocket.
- * @param {Request} request - The initial upgrade request.
- * @param {object} config - The application configuration.
- * @param {object} logContext - The logging context.
+ * Handles inbound WebSocket upgrade requests, the core of the VLESS data plane.
  */
-export async function handleConduitRequest(webSocket, request, config, logContext) {
-    const conduitLogContext = { ...logContext, section: 'CONDUIT' };
-    const earlyDataHeader = request.headers.get('Sec-Websocket-Protocol') || '';
-    const readableWebSocketStream = makeReadableWebSocketStream(webSocket, earlyDataHeader, conduitLogContext);
-
-    let remoteSocket = null;
-    let udpStreamWrite = null;
-    let isDns = false;
-
-    readableWebSocketStream
-        .pipeTo(
-            new WritableStream({
-                async write(chunk) {
-                    if (isDns && udpStreamWrite) {
-                        return udpStreamWrite(chunk);
-                    }
-                    if (remoteSocket) {
-                        const writer = remoteSocket.writable.getWriter();
-                        await writer.write(chunk);
-                        writer.releaseLock();
-                        return;
-                    }
-
-                    const { hasError, message, portRemote = 443, addressRemote = '', rawDataIndex, streamVersion, isUDP } =
-                        processStreamHeader(chunk, config.USER_ID);
-
-                    conduitLogContext.remoteAddress = addressRemote;
-                    conduitLogContext.remotePort = portRemote;
-                    log.info(conduitLogContext, 'PROCESS', `Remote: ${isUDP ? 'UDP' : 'TCP'}://${addressRemote}:${portRemote}`);
-
-                    if (hasError) {
-                        throw new Error(message);
-                    }
-
-                    if (isUDP && portRemote !== 53) {
-                        throw new Error('UDP transport is only enabled for DNS (port 53).');
-                    }
-
-                    const streamResponseHeader = new Uint8Array([streamVersion[0], 0]);
-                    const rawClientData = chunk.slice(rawDataIndex);
-
-                    if (isUDP) {
-                        isDns = true;
-                        const { write } = await handleUDPOutBound(webSocket, streamResponseHeader, config, conduitLogContext);
-                        udpStreamWrite = write;
-                        udpStreamWrite(rawClientData);
-                    } else {
-                        remoteSocket = await handleTCPOutBound(
-                            addressRemote,
-                            portRemote,
-                            rawClientData,
-                            webSocket,
-                            streamResponseHeader,
-                            conduitLogContext
-                        );
-                    }
-                },
-                close() {
-                    log.info(conduitLogContext, 'CLOSE', 'Client WebSocket stream closed.');
-                    if (remoteSocket) remoteSocket.close();
-                },
-                abort(reason) {
-                    log.warn(conduitLogContext, 'ABORT', 'Client WebSocket stream aborted:', reason);
-                    if (remoteSocket) remoteSocket.close();
-                },
-            })
-        )
-        .catch((err) => {
-            log.error(conduitLogContext, 'ERROR', 'Stream pipe error:', err.stack || err);
-            safeCloseWebSocket(webSocket, conduitLogContext);
-            if (remoteSocket) remoteSocket.close();
-        });
+export function handleConduitRequest(request, config, logContext) {
+  const conduitLogContext = { ...logContext, section: 'CONDUIT' };
+  const { socket: webSocket, response } = Deno.upgradeWebSocket(request); // Use Deno's native WebSocket upgrader.
+  const earlyDataHeader = request.headers.get('Sec-Websocket-Protocol') || '';
+  const readableWebSocketStream = makeReadableWebSocketStream(webSocket, earlyDataHeader, conduitLogContext);
+  let remoteSocketWrapper = { value: null };
+  let udpStreamWrite = null;
+  let isDns = false;
+  readableWebSocketStream
+    .pipeTo(
+      new WritableStream({
+        async write(chunk) {
+          // Deno's WebSocket message event sometimes provides a Uint8Array,
+          // but our stream processing expects an ArrayBuffer. Ensure consistency.
+          const buffer = chunk instanceof ArrayBuffer ? chunk : chunk.buffer;
+          if (isDns && udpStreamWrite) {
+            return udpStreamWrite(buffer);
+          }
+          if (remoteSocketWrapper.value) {
+            const writer = remoteSocketWrapper.value.writable.getWriter();
+            try {
+              await writer.write(buffer);
+            } finally {
+              writer.releaseLock();
+            }
+            return;
+          }
+          const {
+            hasError,
+            message,
+            portRemote = 443,
+            addressRemote = '',
+            rawDataIndex,
+            streamVersion = new Uint8Array([0, 0]),
+            isUDP,
+          } = processStreamHeader(buffer, config.USER_ID);
+          conduitLogContext.remoteAddress = addressRemote;
+          conduitLogContext.remotePort = portRemote;
+          log.info(conduitLogContext, 'PROCESS', `Stream processed. Remote: ${isUDP ? 'UDP' : 'TCP'}://${addressRemote}:${portRemote}`);
+          if (hasError) {
+            log.error(conduitLogContext, 'ERROR', 'Error processing stream header:', message);
+            throw new Error(message);
+          }
+          if (isUDP && portRemote !== 53) {
+            log.warn(conduitLogContext, 'WARN', 'UDP requested for non-DNS port. Dropping connection.');
+            throw new Error('UDP transport is only enabled for DNS (port 53).');
+          }
+          const streamResponseHeader = new Uint8Array([streamVersion[0], 0]);
+          const rawClientData = buffer.slice(rawDataIndex);
+          if (isUDP && portRemote === 53) {
+            isDns = true;
+            log.info(conduitLogContext, 'UDP', 'Handling UDP DNS request.');
+            const { write } = await handleUDPOutBound(webSocket, streamResponseHeader, config, { ...conduitLogContext });
+            udpStreamWrite = write;
+            udpStreamWrite(rawClientData);
+            return;
+          }
+          log.info(conduitLogContext, 'TCP', 'Handling TCP request.');
+          handleTCPOutBound(remoteSocketWrapper, addressRemote, portRemote, rawClientData, webSocket, streamResponseHeader, config, {
+            ...conduitLogContext,
+          });
+        },
+        close() {
+          log.info(conduitLogContext, 'CLOSE', 'Client WebSocket stream closed.');
+          safeCloseWebSocket(webSocket, conduitLogContext);
+        },
+        abort(reason) {
+          log.warn(conduitLogContext, 'ABORT', 'Client WebSocket stream aborted:', reason);
+          safeCloseWebSocket(webSocket, conduitLogContext);
+        },
+      })
+    )
+    .catch((err) => {
+      log.error(conduitLogContext, 'ERROR', 'Error in readableWebSocketStream pipeTo:', err.stack || err);
+      safeCloseWebSocket(webSocket, conduitLogContext);
+    });
+  return response;
 }
-
 /**
- * Handles outbound TCP connections.
- * @param {string} addressRemote - The remote address.
- * @param {number} portRemote - The remote port.
- * @param {Uint8Array} rawClientData - Initial data to send.
- * @param {WebSocket} webSocket - The client WebSocket.
- * @param {Uint8Array} streamResponseHeader - The VLESS response header.
- * @param {object} logContext - The logging context.
- * @returns {Promise<Deno.Conn>} The established TCP socket.
+ * Handles outbound TCP connections with improved, explicit error handling.
  */
-async function handleTCPOutBound(addressRemote, portRemote, rawClientData, webSocket, streamResponseHeader, logContext) {
-    const tcpLogContext = { ...logContext, section: 'CONDUIT:TCP' };
-
+async function handleTCPOutBound(
+  remoteSocketWrapper,
+  addressRemote,
+  portRemote,
+  rawClientData,
+  webSocket,
+  streamResponseHeader,
+  config,
+  logContext
+) {
+  const tcpLogContext = { ...logContext, section: 'CONDUIT:TCP' };
+  async function connectAndWrite(address, port) {
     try {
-        const tcpSocket = await Deno.connect({ hostname: addressRemote, port: portRemote });
-        log.info(tcpLogContext, 'CONNECT', `Connected to ${addressRemote}:${portRemote}`);
-
-        const writer = tcpSocket.writable.getWriter();
-        await writer.write(rawClientData);
-        writer.releaseLock();
-
-        remoteSocketToWS(tcpSocket, webSocket, streamResponseHeader, tcpLogContext);
-        return tcpSocket;
+      const tcpSocket = await Deno.connect({ hostname: address, port: port });
+      remoteSocketWrapper.value = tcpSocket;
+      log.info(tcpLogContext, 'CONNECT', `Connecting to ${address}:${port}`);
+      const writer = tcpSocket.writable.getWriter();
+      await writer.write(rawClientData);
+      log.debug(tcpLogContext, 'WRITE', 'Initial data written to remote socket.');
+      writer.releaseLock();
+      return tcpSocket;
     } catch (error) {
-        log.error(tcpLogContext, 'ERROR', `Failed to connect to ${addressRemote}:${portRemote}:`, error);
-        safeCloseWebSocket(webSocket, tcpLogContext);
-        throw error;
+      log.error(tcpLogContext, 'ERROR', `Error connecting to ${address}:${port}:`, error.message);
+      safeCloseWebSocket(webSocket, logContext);
+      return null; // Return null on failure for explicit checking.
     }
+  }
+  const tcpSocket = await connectAndWrite(addressRemote, portRemote);
+  if (!tcpSocket) {
+    // If the connection failed, log and stop.
+    log.warn(tcpLogContext, 'ABORT', 'TCP connection failed, aborting pipe setup.');
+    return;
+  }
+  remoteSocketToWS(tcpSocket, webSocket, streamResponseHeader, { ...tcpLogContext });
 }
 
 /**
- * Pipes data from the remote TCP socket to the client WebSocket.
- * @param {Deno.Conn} remoteSocket - The remote TCP socket.
- * @param {WebSocket} webSocket - The client WebSocket.
- * @param {Uint8Array} streamResponseHeader - The VLESS response header.
- * @param {object} logContext - The logging context.
+ * Pipes data from the remote Deno TCP socket to the client WebSocket, using
+ * performant buffer concatenation. This version is cleaned of all retry logic.
  */
 async function remoteSocketToWS(remoteSocket, webSocket, streamResponseHeader, logContext) {
-    const wsLogContext = { ...logContext, section: 'CONDUIT:WS' };
-    let streamHeaderSent = false;
-
-    remoteSocket.readable
-        .pipeTo(
-            new WritableStream({
-                async write(chunk) {
-                    if (webSocket.readyState === WS_READY_STATE_OPEN) {
-                        if (!streamHeaderSent) {
-                            const combinedData = new Uint8Array(streamResponseHeader.length + chunk.length);
-                            combinedData.set(streamResponseHeader);
-                            combinedData.set(chunk, streamResponseHeader.length);
-                            webSocket.send(combinedData);
-                            streamHeaderSent = true;
-                        } else {
-                            webSocket.send(chunk);
-                        }
-                    }
-                },
-                close() {
-                    log.info(wsLogContext, 'CLOSE', 'Remote socket readable stream closed.');
-                },
-                abort(reason) {
-                    log.error(wsLogContext, 'ABORT', 'Remote socket readable stream aborted:', reason);
-                },
-            })
-        )
-        .catch((error) => {
-            log.error(wsLogContext, 'ERROR', 'Error piping remote socket to WebSocket:', error);
-            safeCloseWebSocket(webSocket, wsLogContext);
-        });
+  const wsLogContext = { ...logContext, section: 'CONDUIT:WS' };
+  let streamHeaderSent = false;
+  await remoteSocket.readable
+    .pipeTo(
+      new WritableStream({
+        write(chunk) {
+          if (webSocket.readyState === WS_READY_STATE_OPEN) {
+            if (!streamHeaderSent) {
+              // IMPROVEMENT: Use direct Uint8Array.set for efficient buffer concatenation.
+              const combinedBuffer = new Uint8Array(streamResponseHeader.length + chunk.length);
+              combinedBuffer.set(streamResponseHeader, 0);
+              combinedBuffer.set(chunk, streamResponseHeader.length);
+              webSocket.send(combinedBuffer);
+              streamHeaderSent = true;
+              log.debug(wsLogContext, 'WRITE', 'Stream response header sent.');
+            } else {
+              webSocket.send(chunk);
+            }
+            log.debug(wsLogContext, 'WRITE', 'Data sent to client via WebSocket.');
+          } else {
+            log.error(wsLogContext, 'ERROR', 'WebSocket is not open. Ready state:', webSocket.readyState);
+          }
+        },
+        close() {
+          log.info(wsLogContext, 'CLOSE', `Remote socket readable stream closed.`);
+        },
+        abort(reason) {
+          log.error(wsLogContext, 'ABORT', 'Remote socket readable stream aborted:', reason);
+        },
+      })
+    )
+    .catch((error) => {
+      log.error(wsLogContext, 'ERROR', 'Error piping remote socket to WebSocket:', error.stack || error);
+      safeCloseWebSocket(webSocket, wsLogContext);
+    });
 }
 
 /**
- * Handles outbound UDP (DNS over HTTPS) requests.
- * @param {WebSocket} webSocket - The client WebSocket.
- * @param {Uint8Array} streamResponseHeader - The VLESS response header.
- * @param {object} config - The application configuration.
- * @param {object} logContext - The logging context.
+ * Handles outbound UDP (DNS) connections with optimized buffer handling.
  */
 async function handleUDPOutBound(webSocket, streamResponseHeader, config, logContext) {
-    const udpLogContext = { ...logContext, section: 'CONDUIT:UDP' };
-    let isStreamHeaderSent = false;
-
-    const transformStream = new TransformStream({
-        transform(chunk, controller) {
-            for (let index = 0; index < chunk.byteLength;) {
-                const lengthBuffer = chunk.slice(index, index + 2);
-                const udpPacketLength = new DataView(lengthBuffer).getUint16(0);
-                const udpData = new Uint8Array(chunk.slice(index + 2, index + 2 + udpPacketLength));
-                index += 2 + udpPacketLength;
-                controller.enqueue(udpData);
+  const udpLogContext = { ...logContext, section: 'CONDUIT:UDP' };
+  let isStreamHeaderSent = false;
+  const transformStream = new TransformStream({
+    transform(chunk, controller) {
+      log.debug(udpLogContext, 'UDP:TRANSFORM', 'Transforming UDP chunk.');
+      for (let index = 0; index < chunk.byteLength; ) {
+        const lengthBuffer = chunk.slice(index, index + 2);
+        const udpPacketLength = new DataView(lengthBuffer).getUint16(0);
+        const udpData = new Uint8Array(chunk.slice(index + 2, index + 2 + udpPacketLength));
+        index = index + 2 + udpPacketLength;
+        controller.enqueue(udpData);
+      }
+    },
+  });
+  transformStream.readable
+    .pipeTo(
+      new WritableStream({
+        async write(chunk) {
+          try {
+            log.debug(udpLogContext, 'UDP:DOH', 'Sending DNS query via DoH.');
+            const resp = await fetch(config.DOH_URL, {
+              method: 'POST',
+              headers: { 'content-type': 'application/dns-message' },
+              body: chunk,
+            });
+            if (!resp.ok) {
+              log.error(udpLogContext, 'UDP:DOH:ERROR', `DoH request failed with status: ${resp.status}`);
+              return;
             }
+            const dnsQueryResult = await resp.arrayBuffer();
+            const udpSize = dnsQueryResult.byteLength;
+            const udpSizeBuffer = new Uint8Array([(udpSize >> 8) & 0xff, udpSize & 0xff]);
+            if (webSocket.readyState === WS_READY_STATE_OPEN) {
+              log.info(udpLogContext, 'UDP:DOH:SUCCESS', `DoH query successful. Length: ${udpSize}`);
+              let dataToSend;
+              // IMPROVEMENT: Use direct Uint8Array.set for efficient buffer concatenation.
+              if (isStreamHeaderSent) {
+                dataToSend = new Uint8Array(udpSizeBuffer.length + dnsQueryResult.byteLength);
+                dataToSend.set(udpSizeBuffer, 0);
+                dataToSend.set(new Uint8Array(dnsQueryResult), udpSizeBuffer.length);
+              } else {
+                const combinedLength = streamResponseHeader.length + udpSizeBuffer.length + dnsQueryResult.byteLength;
+                dataToSend = new Uint8Array(combinedLength);
+                dataToSend.set(streamResponseHeader, 0);
+                dataToSend.set(udpSizeBuffer, streamResponseHeader.length);
+                dataToSend.set(new Uint8Array(dnsQueryResult), streamResponseHeader.length + udpSizeBuffer.length);
+                isStreamHeaderSent = true;
+              }
+              webSocket.send(dataToSend);
+            }
+          } catch (error) {
+            log.error(udpLogContext, 'UDP:ERROR', 'Error in DoH request:', error.message);
+          }
         },
+      })
+    )
+    .catch((error) => {
+      log.error(udpLogContext, 'UDP:ERROR', 'Error piping UDP data to DoH endpoint:', error.message);
     });
-
-    transformStream.readable.pipeTo(
-        new WritableStream({
-            async write(chunk) {
-                try {
-                    const resp = await fetch(config.DOH_URL, {
-                        method: 'POST',
-                        headers: { 'content-type': 'application/dns-message' },
-                        body: chunk,
-                    });
-
-                    if (!resp.ok) {
-                        log.error(udpLogContext, 'DOH:ERROR', `DoH request failed: ${resp.status}`);
-                        return;
-                    }
-
-                    const dnsQueryResult = await resp.arrayBuffer();
-                    const udpSize = dnsQueryResult.byteLength;
-                    const udpSizeBuffer = new Uint8Array([(udpSize >> 8) & 0xff, udpSize & 0xff]);
-
-                    if (webSocket.readyState === WS_READY_STATE_OPEN) {
-                        const dataToSend = isStreamHeaderSent
-                            ? new Blob([udpSizeBuffer, dnsQueryResult])
-                            : new Blob([streamResponseHeader, udpSizeBuffer, dnsQueryResult]);
-
-                        webSocket.send(await dataToSend.arrayBuffer());
-                        isStreamHeaderSent = true;
-                    }
-                } catch (error) {
-                    log.error(udpLogContext, 'DOH:ERROR', 'Error in DoH request:', error);
-                }
-            },
-        })
-    );
-
-    const writer = transformStream.writable.getWriter();
-    return {
-        write: (chunk) => writer.write(chunk),
-    };
+  const writer = transformStream.writable.getWriter();
+  return {
+    write: (chunk) => {
+      log.debug(udpLogContext, 'UDP:WRITE', 'Writing chunk to UDP transform stream.');
+      writer.write(chunk);
+    },
+  };
 }

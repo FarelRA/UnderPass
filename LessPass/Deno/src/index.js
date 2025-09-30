@@ -4,40 +4,45 @@ import { log, generateLogId } from './logs.js';
 import { handleConduitRequest } from './conduit.js';
 import { handleHttpRequest } from './http.js';
 
-const HOSTNAME = Deno.env.get("HOSTNAME") || "0.0.0.0";
-const PORT = parseInt(Deno.env.get("PORT") || "8080", 10);
+// --- Configuration ---
+const HOSTNAME = Deno.env.get('HOSTNAME') || '0.0.0.0';
+const PORT = parseInt(Deno.env.get('PORT') || '8443', 10);
 
-console.log(`VLESS server starting on ${HOSTNAME}:${PORT}`);
+console.log(`Deno VLESS Server starting on ${HOSTNAME}:${PORT}`);
+console.log('To run, use: deno run --allow-net --allow-env index.js');
 
+/**
+ * Main Deno server entry point using the native `Deno.serve` API.
+ * This handler is the equivalent of the `fetch` export in Cloudflare Workers.
+ */
 Deno.serve({
   hostname: HOSTNAME,
   port: PORT,
-  handler: async (request, connInfo) => {
+  handler: async (request, info) => {
     const logId = generateLogId();
-    const clientIP = connInfo.remoteAddr.hostname;
-    const logContext = { logId, clientIP, section: 'SERVER' };
-
+    // Get client IP from the connection info object provided by Deno.serve.
+    const clientIP = info.remoteAddr.hostname;
+    const logContext = { logId, clientIP, section: 'WORKER' };
     try {
+      const url = new URL(request.url);
       const config = getConfig();
-      log.setLogLevel(config.LOG_LEVEL);
-
       const upgradeHeader = request.headers.get('Upgrade');
+      log.setLogLevel(config.LOG_LEVEL);
+      log.info(logContext, 'REQUEST', 'New request received.');
       if (upgradeHeader === 'websocket') {
-        log.info(logContext, 'UPGRADE', 'Handling WebSocket upgrade request.');
-        const { socket, response } = Deno.upgradeWebSocket(request);
-        handleConduitRequest(socket, request, config, logContext);
-        return response;
+        log.info(logContext, 'CONDUIT', 'Handling WebSocket upgrade request.');
+        return handleConduitRequest(request, config, { ...logContext });
       } else {
         log.info(logContext, 'HTTP', 'Handling HTTP request.');
-        return await handleHttpRequest(request, config, logContext);
+        return await handleHttpRequest(request, url, config, { ...logContext });
       }
     } catch (err) {
-      log.error(logContext, 'ERROR', 'Handler error:', err);
+      log.error(logContext, 'ERROR', 'Top-level server error:', err.stack || err);
       return new Response(err.toString(), { status: 500 });
     }
   },
-  onError(error) {
-    console.error("Fatal server error:", error);
-    return new Response("Internal Server Error", { status: 500 });
+  onError: (error) => {
+    console.error('Fatal server error:', error);
+    return new Response('Internal Server Error', { status: 500 });
   },
 });

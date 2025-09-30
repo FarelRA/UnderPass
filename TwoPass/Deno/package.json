@@ -1,12 +1,9 @@
 {
-  "name": "denopass",
+  "name": "twopass",
   "version": "1.0.2",
   "description": "Edge network H2 tunnel implemented in Deno Deploy",
   "private": true,
   "scripts": {
     "start": "deno run --allow-net --allow-env --allow-write --allow-read --watch src/index.js"
-  },
-  "devDependencies": {
-    "wrangler": ">=4.0.0"
   }
 }

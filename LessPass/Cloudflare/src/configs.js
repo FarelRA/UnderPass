@@ -4,17 +4,18 @@
 // or URL parameters.
 export let CONFIG = {
   USER_ID: '86c50e3a-5b87-49dd-bd20-03c7f2735e40', // Example UUID.
-  PASSWORD: 'password', // Default password. *CHANGE IN PRODUCTION*.
-  RELAY_ADDR: 'bpb.yousef.isegaro.com:443', // Default relay address.
+  PASSWORD: 'password', // Default password for the /info endpoint. *CHANGE IN PRODUCTION*.
+  RELAY_ADDR: 'bpb.yousef.isegaro.com:443', // Default relay address for the retry mechanism.
   DOH_URL: 'https://cloudflare-dns.com/dns-query', // Default DNS-over-HTTPS resolver.
-  LOG_LEVEL: 'INFO', // Default log level.
+  LOG_LEVEL: 'INFO', // Default log level. Can be 'DEBUG', 'INFO', 'WARN', 'ERROR'.
 };
 
-// WebSocket ready state constants.
+// WebSocket ready state constants for checking connection status.
 export const WS_READY_STATE_OPEN = 1;
 export const WS_READY_STATE_CLOSING = 2;
 
-// Pre-calculate byte-to-hexadecimal mappings for UUID stringification.
+// Pre-calculate byte-to-hexadecimal mappings for efficient UUID stringification.
+// This avoids repeated calculations in hot code paths.
 export const byteToHex = [
   '00',
   '01',
@@ -273,14 +274,13 @@ export const byteToHex = [
   'fe',
   'ff',
 ];
-
 /**
  * Retrieves and updates the configuration from environment variables and URL
  * parameters. Environment variables take precedence over defaults, and URL
  * parameters take precedence over environment variables.
  *
  * @param {URL} url - The request URL.
- * @param {object} env - The environment variables.
+ * @param {object} env - The environment variables provided by the Cloudflare Worker runtime.
  * @returns {object} The updated configuration object.
  */
 export function getConfig(url, env) {
@@ -290,11 +290,9 @@ export function getConfig(url, env) {
   if (env.DOH_URL) CONFIG.DOH_URL = env.DOH_URL;
   if (env.PASSWORD) CONFIG.PASSWORD = env.PASSWORD;
   if (env.LOG_LEVEL) CONFIG.LOG_LEVEL = env.LOG_LEVEL;
-
   // Override with URL parameters.
   if (url.searchParams.get('relay')) CONFIG.RELAY_ADDR = url.searchParams.get('relay');
   if (url.searchParams.get('doh')) CONFIG.DOH_URL = url.searchParams.get('doh');
   if (url.searchParams.get('log')) CONFIG.LOG_LEVEL = url.searchParams.get('log');
-
   return CONFIG;
 }
