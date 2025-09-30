@@ -8,18 +8,17 @@ import { log } from './logs.js';
  */
 export function handleConduitRequest(request, config, logContext) {
   const conduitLogContext = { ...logContext, section: 'CONDUIT' };
-  const { socket: webSocket, response } = Deno.upgradeWebSocket(request); // Use Deno's native WebSocket upgrader.
+  const { socket: webSocket, response } = Deno.upgradeWebSocket(request);
   const earlyDataHeader = request.headers.get('Sec-Websocket-Protocol') || '';
   const readableWebSocketStream = makeReadableWebSocketStream(webSocket, earlyDataHeader, conduitLogContext);
   let remoteSocketWrapper = { value: null };
   let udpStreamWrite = null;
   let isDns = false;
+
   readableWebSocketStream
     .pipeTo(
       new WritableStream({
         async write(chunk) {
-          // Deno's WebSocket message event sometimes provides a Uint8Array,
-          // but our stream processing expects an ArrayBuffer. Ensure consistency.
           const buffer = chunk instanceof ArrayBuffer ? chunk : chunk.buffer;
           if (isDns && udpStreamWrite) {
             return udpStreamWrite(buffer);
@@ -33,6 +32,9 @@ export function handleConduitRequest(request, config, logContext) {
             }
             return;
           }
+
+          // ===== HEADER-PROCESSING AND CONNECTION LOGIC =====
+          // This section only runs for the first data chunk.
           const {
             hasError,
             message,
@@ -42,9 +44,11 @@ export function handleConduitRequest(request, config, logContext) {
             streamVersion = new Uint8Array([0, 0]),
             isUDP,
           } = processStreamHeader(buffer, config.USER_ID);
+
           conduitLogContext.remoteAddress = addressRemote;
           conduitLogContext.remotePort = portRemote;
           log.info(conduitLogContext, 'PROCESS', `Stream processed. Remote: ${isUDP ? 'UDP' : 'TCP'}://${addressRemote}:${portRemote}`);
+
           if (hasError) {
             log.error(conduitLogContext, 'ERROR', 'Error processing stream header:', message);
             throw new Error(message);
@@ -53,18 +57,25 @@ export function handleConduitRequest(request, config, logContext) {
             log.warn(conduitLogContext, 'WARN', 'UDP requested for non-DNS port. Dropping connection.');
             throw new Error('UDP transport is only enabled for DNS (port 53).');
           }
+
           const streamResponseHeader = new Uint8Array([streamVersion[0], 0]);
           const rawClientData = buffer.slice(rawDataIndex);
+
           if (isUDP && portRemote === 53) {
             isDns = true;
             log.info(conduitLogContext, 'UDP', 'Handling UDP DNS request.');
             const { write } = await handleUDPOutBound(webSocket, streamResponseHeader, config, { ...conduitLogContext });
             udpStreamWrite = write;
-            udpStreamWrite(rawClientData);
+            await udpStreamWrite(rawClientData); // Wait for the first write to complete
             return;
           }
+
           log.info(conduitLogContext, 'TCP', 'Handling TCP request.');
-          handleTCPOutBound(remoteSocketWrapper, addressRemote, portRemote, rawClientData, webSocket, streamResponseHeader, config, {
+
+          // We MUST await the entire TCP setup and piping process.
+          // This prevents the write() function from returning prematurely, which would
+          // cause a race condition if another data chunk arrived.
+          await handleTCPOutBound(remoteSocketWrapper, addressRemote, portRemote, rawClientData, webSocket, streamResponseHeader, config, {
             ...conduitLogContext,
           });
         },
@@ -82,10 +93,12 @@ export function handleConduitRequest(request, config, logContext) {
       log.error(conduitLogContext, 'ERROR', 'Error in readableWebSocketStream pipeTo:', err.stack || err);
       safeCloseWebSocket(webSocket, conduitLogContext);
     });
+
   return response;
 }
+
 /**
- * Handles outbound TCP connections with improved, explicit error handling.
+ * Handles outbound TCP connections. Now a self-contained, awaited operation.
  */
 async function handleTCPOutBound(
   remoteSocketWrapper,
@@ -98,10 +111,12 @@ async function handleTCPOutBound(
   logContext
 ) {
   const tcpLogContext = { ...logContext, section: 'CONDUIT:TCP' };
+
+  // This inner function is a good pattern, no changes needed.
   async function connectAndWrite(address, port) {
     try {
       const tcpSocket = await Deno.connect({ hostname: address, port: port });
-      remoteSocketWrapper.value = tcpSocket;
+      remoteSocketWrapper.value = tcpSocket; // Set the socket in the wrapper so subsequent writes can use it
       log.info(tcpLogContext, 'CONNECT', `Connecting to ${address}:${port}`);
       const writer = tcpSocket.writable.getWriter();
       await writer.write(rawClientData);
@@ -111,21 +126,25 @@ async function handleTCPOutBound(
     } catch (error) {
       log.error(tcpLogContext, 'ERROR', `Error connecting to ${address}:${port}:`, error.message);
       safeCloseWebSocket(webSocket, logContext);
-      return null; // Return null on failure for explicit checking.
+      return null;
     }
   }
+
   const tcpSocket = await connectAndWrite(addressRemote, portRemote);
+
   if (!tcpSocket) {
-    // If the connection failed, log and stop.
     log.warn(tcpLogContext, 'ABORT', 'TCP connection failed, aborting pipe setup.');
-    return;
+    // By throwing here, the error will propagate up to the pipeTo().catch() block,
+    // which will correctly terminate the stream.
+    throw new Error(`Failed to connect to ${addressRemote}:${portRemote}`);
   }
-  remoteSocketToWS(tcpSocket, webSocket, streamResponseHeader, { ...tcpLogContext });
+
+  // This await is also critical to ensure the piping runs to completion before this function returns.
+  await remoteSocketToWS(tcpSocket, webSocket, streamResponseHeader, { ...tcpLogContext });
 }
 
 /**
- * Pipes data from the remote Deno TCP socket to the client WebSocket, using
- * performant buffer concatenation. This version is cleaned of all retry logic.
+ * Pipes data from the remote Deno TCP socket to the client WebSocket.
  */
 async function remoteSocketToWS(remoteSocket, webSocket, streamResponseHeader, logContext) {
   const wsLogContext = { ...logContext, section: 'CONDUIT:WS' };
@@ -136,7 +155,6 @@ async function remoteSocketToWS(remoteSocket, webSocket, streamResponseHeader, l
         write(chunk) {
           if (webSocket.readyState === WS_READY_STATE_OPEN) {
             if (!streamHeaderSent) {
-              // IMPROVEMENT: Use direct Uint8Array.set for efficient buffer concatenation.
               const combinedBuffer = new Uint8Array(streamResponseHeader.length + chunk.length);
               combinedBuffer.set(streamResponseHeader, 0);
               combinedBuffer.set(chunk, streamResponseHeader.length);
@@ -166,7 +184,7 @@ async function remoteSocketToWS(remoteSocket, webSocket, streamResponseHeader, l
 }
 
 /**
- * Handles outbound UDP (DNS) connections with optimized buffer handling.
+ * Handles outbound UDP (DNS) connections.
  */
 async function handleUDPOutBound(webSocket, streamResponseHeader, config, logContext) {
   const udpLogContext = { ...logContext, section: 'CONDUIT:UDP' };
@@ -183,7 +201,7 @@ async function handleUDPOutBound(webSocket, streamResponseHeader, config, logCon
       }
     },
   });
-  transformStream.readable
+  const readable = transformStream.readable
     .pipeTo(
       new WritableStream({
         async write(chunk) {
@@ -204,7 +222,6 @@ async function handleUDPOutBound(webSocket, streamResponseHeader, config, logCon
             if (webSocket.readyState === WS_READY_STATE_OPEN) {
               log.info(udpLogContext, 'UDP:DOH:SUCCESS', `DoH query successful. Length: ${udpSize}`);
               let dataToSend;
-              // IMPROVEMENT: Use direct Uint8Array.set for efficient buffer concatenation.
               if (isStreamHeaderSent) {
                 dataToSend = new Uint8Array(udpSizeBuffer.length + dnsQueryResult.byteLength);
                 dataToSend.set(udpSizeBuffer, 0);
@@ -230,7 +247,7 @@ async function handleUDPOutBound(webSocket, streamResponseHeader, config, logCon
     });
   const writer = transformStream.writable.getWriter();
   return {
-    write: (chunk) => {
+    write: async (chunk) => {
       log.debug(udpLogContext, 'UDP:WRITE', 'Writing chunk to UDP transform stream.');
       writer.write(chunk);
     },
