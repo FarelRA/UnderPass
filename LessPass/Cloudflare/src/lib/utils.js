@@ -37,16 +37,18 @@ function createBufferReader(buffer) {
 }
 
 /**
- * Creates a ReadableStream from a WebSocket, bridging the event-based API
- * to the modern Streams API.
+ * Creates a ReadableStream from a WebSocket, atomically handling early data
+ * and subsequent messages to prevent race conditions.
  * @param {WebSocket} webSocket - The server-side WebSocket.
+ * @param {string} earlyDataHeader - The base64-encoded early data.
  * @param {object} logContext - Logging context.
  * @returns {ReadableStream}
  */
-export function makeReadableWebSocketStream(webSocket, logContext) {
+export function makeReadableWebSocketStream(webSocket, earlyDataHeader, logContext) {
   let readableStreamCancel = false;
   return new ReadableStream({
     start(controller) {
+      // Attach listeners for subsequent messages.
       webSocket.addEventListener('message', (event) => {
         if (readableStreamCancel) return;
         // Ensure data is in a consistent Uint8Array format
@@ -58,18 +60,27 @@ export function makeReadableWebSocketStream(webSocket, logContext) {
         try {
           controller.close();
         } catch (e) {
-          // Suppress errors if the stream is already closed.
+          /* Ignore */
         }
       });
       webSocket.addEventListener('error', (err) => {
         logger.error(logContext, 'WEBSOCKET_STREAM_ERROR', 'WebSocket error:', err);
         controller.error(err);
       });
+
+      // Immediately process and enqueue early data if it exists.
+      // This happens in the same synchronous step as attaching listeners.
+      const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader);
+      if (error) {
+        controller.error(new Error('Failed to decode early data.'));
+      } else if (earlyData) {
+        controller.enqueue(new Uint8Array(earlyData));
+      }
     },
     pull() {
-      // Backpressure is not implemented as WebSocket events are push-based.
+      /* No backpressure needed */
     },
-    cancel(reason) {
+    cancel() {
       if (readableStreamCancel) return;
       readableStreamCancel = true;
       safeCloseWebSocket(webSocket, logContext);
