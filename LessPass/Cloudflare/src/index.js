@@ -21,12 +21,10 @@ export default {
     const logContext = { logId, clientIP };
 
     try {
-      // Initialize a request-scoped configuration. This avoids global mutable state.
       const config = initializeConfig(new URL(request.url), env);
       logger.setLogLevel(config.LOG_LEVEL);
 
-      const upgradeHeader = request.headers.get('Upgrade');
-      if (upgradeHeader === 'websocket') {
+      if (request.headers.get('Upgrade') === 'websocket') {
         logger.info({ ...logContext, section: 'WORKER' }, 'ROUTING', 'Handling WebSocket (VLESS) request.');
         return handleVlessRequest(request, config, logContext);
       } else {

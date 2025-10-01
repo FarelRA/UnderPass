@@ -6,6 +6,30 @@
 import { logger } from '../lib/logger.js';
 
 /**
+ * Main HTTP request handler. Routes to the info endpoint or returns a
+ * masquerading 404 page for all other paths.
+ * @param {Request} request The incoming request.
+ * @param {object} env The environment variables.
+ * @param {object} config The request-scoped configuration.
+ * @param {object} logContext Logging context.
+ * @returns {Promise<Response>}
+ */
+export async function handleHttpRequest(request, env, config, logContext) {
+  const url = new URL(request.url);
+  const httpLogContext = { ...logContext, section: 'HTTP' };
+
+  if (url.pathname.endsWith('/info')) {
+    return handleInfoRequest(request, env, config, httpLogContext);
+  }
+
+  logger.info(httpLogContext, 'MASQUERADE', 'Returning 404 Not Found.');
+  return new Response(
+    `<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>`,
+    { status: 404, headers: { 'Content-Type': 'text/html' } }
+  );
+}
+
+/**
  * Handles requests to the "/info" endpoint, providing diagnostic information.
  * Requires Basic Authentication using the configured password.
  * @param {Request} request The incoming request.
@@ -40,28 +64,4 @@ function handleInfoRequest(request, env, config, logContext) {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
-}
-
-/**
- * Main HTTP request handler. Routes to the info endpoint or returns a
- * masquerading 404 page for all other paths.
- * @param {Request} request The incoming request.
- * @param {object} env The environment variables.
- * @param {object} config The request-scoped configuration.
- * @param {object} logContext Logging context.
- * @returns {Promise<Response>}
- */
-export async function handleHttpRequest(request, env, config, logContext) {
-  const url = new URL(request.url);
-  const httpLogContext = { ...logContext, section: 'HTTP' };
-
-  if (url.pathname.endsWith('/info')) {
-    return handleInfoRequest(request, env, config, httpLogContext);
-  }
-
-  logger.info(httpLogContext, 'MASQUERADE', 'Returning 404 Not Found.');
-  return new Response(
-    `<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>`,
-    { status: 404, headers: { 'Content-Type': 'text/html' } }
-  );
 }
