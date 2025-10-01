@@ -9,9 +9,9 @@ function formatLogMessage(level, message, context = {}, additionalInfo = '', ...
   const timestamp = new Date().toISOString();
   const { logId = 'N/A', section = 'N/A', clientIP = 'N/A', remoteAddress, remotePort } = context;
   const fullSection = additionalInfo ? `${section}:${additionalInfo}` : section;
-  const remote = remoteAddress && remotePort ? `[Remote: ${remoteAddress}:${remotePort}]` : '';
+  const remote = remoteAddress && remotePort ? `[Remote: ${remoteAddress}:${remotePort}] ` : '';
   const optionalData = optionalParams.length > 0 ? ` ${JSON.stringify(optionalParams)}` : '';
-  return `[${timestamp}] [${level}] [${logId}] [${fullSection}] [Client: ${clientIP}]${remote} ${message}${optionalData}`;
+  return `[${timestamp}] [${level}] [${logId}] [${fullSection}] [Client: ${clientIP}] ${remote}${message}${optionalData}`;
 }
 
 export const logger = {

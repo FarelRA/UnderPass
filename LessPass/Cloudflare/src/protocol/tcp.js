@@ -115,7 +115,7 @@ async function pumpRemoteToClient(reader, webSocket, logContext) {
     while (true) {
       const { value, done } = await reader.read();
       if (done) {
-        await reader.cancel(error);
+        await reader.releaseLock();
         break;
       }
       if (!hasPumpedData) hasPumpedData = true;
