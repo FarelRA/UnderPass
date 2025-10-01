@@ -3,10 +3,8 @@
 // Description: Shared utilities for VLESS parsing, stream manipulation, and WebSockets.
 // =================================================================
 
-import { byteToHex, config } from '../lib/config.js';
+import { byteToHex, VLESS } from '../lib/config.js';
 import { logger } from '../lib/logger.js';
-
-export const WS_READY_STATE = { CONNECTING: 0, OPEN: 1, CLOSING: 2, CLOSED: 3 };
 
 function createBufferReader(buffer) {
   const view = new DataView(buffer);
@@ -125,48 +123,85 @@ export function base64ToArrayBuffer(base64Str) {
 /**
  * Processes the VLESS protocol header from a buffer.
  * @param {ArrayBuffer} streamBuffer - The buffer containing the protocol header.
- * @returns {object} An object containing the extracted destination info, or an error.
+ * @param {string} expectedUserID - The expected UUID string for validation.
+ * @returns {{version: number, protocol: string, address: string, port: number, rawData: Uint8Array} | {error: string}} An object containing the extracted destination info, or an error.
  */
-export function processVlessHeader(streamBuffer) {
-  if (streamBuffer.byteLength < 24) {
-    return { error: 'Invalid VLESS header: insufficient length.' };
+export function processVlessHeader(streamBuffer, expectedUserID) {
+  if (streamBuffer.byteLength < VLESS.MIN_HEADER_LENGTH) {
+    return { error: `Invalid VLESS header: insufficient length. Expected at least ${VLESS.MIN_HEADER_LENGTH} bytes.` };
   }
+
+  // A helper function to read from the buffer.
   const reader = createBufferReader(streamBuffer);
-  const version = reader.readBytes(1); // Normally [0]
-  const userID = reader.readBytes(16);
-  if (stringifyUUID(userID) !== config.USER_ID) {
+
+  // VLESS Header Structure:
+  // 1. Version (1 byte)
+  const version = reader.readUint8();
+
+  // 2. User ID (16 bytes)
+  const userIDBytes = reader.readBytes(VLESS.USERID_LENGTH);
+  // A helper function to format the UUID bytes is assumed to exist.
+  if (stringifyUUID(userIDBytes) !== expectedUserID) {
     return { error: 'Invalid user ID.' };
   }
-  const optLength = reader.readUint8();
-  reader.skip(optLength); // Skip options
-  const command = reader.readUint8(); // 1: TCP, 2: UDP
+
+  // 3. Addons (1 byte length + length bytes)
+  const addonLength = reader.readUint8();
+  reader.skip(addonLength);
+
+  // 4. Command (1 byte)
+  const command = reader.readUint8();
+  let protocol;
+  switch (command) {
+    case VLESS.COMMAND.TCP:
+      protocol = 'TCP';
+      break;
+
+    case VLESS.COMMAND.UDP:
+      protocol = 'UDP';
+      break;
+
+    default:
+      return { error: `Unsupported VLESS command: ${command}` };
+  }
+
+  // 5. Port (2 bytes, Big Endian)
   const port = reader.readUint16();
-  const addressType = reader.readUint8(); // 1: IPv4, 2: FQDN, 3: IPv6
-  let address = '';
+
+  // 6. Address Type (1 byte) and Address (variable length)
+  const addressType = reader.readUint8();
+  let address;
 
   switch (addressType) {
-    case 1: // IPv4
+    case VLESS.ADDRESS_TYPE.IPV4: // 4 bytes
       address = reader.readBytes(4).join('.');
       break;
-    case 2: // FQDN
+
+    case VLESS.ADDRESS_TYPE.FQDN: // 1 byte length + length bytes
       const domainLength = reader.readUint8();
       address = new TextDecoder().decode(reader.readBytes(domainLength));
       break;
-    case 3: // IPv6
+
+    case VLESS.ADDRESS_TYPE.IPV6: // 16 bytes
       const ipv6Bytes = reader.readBytes(16);
-      const ipv6 = Array.from({ length: 8 }, (_, i) => new DataView(ipv6Bytes.buffer).getUint16(i * 2).toString(16));
-      address = `[${ipv6.join(':')}]`;
+      const view = new DataView(ipv6Bytes.buffer, ipv6Bytes.byteOffset);
+      const parts = Array.from({ length: 8 }, (_, i) => view.getUint16(i * 2).toString(16));
+      address = `[${parts.join(':')}]`;
       break;
+
     default:
-      return { error: `Invalid address type: ${addressType}.` };
+      return { error: `Invalid address type: ${addressType}` };
   }
 
+  // The rest of the buffer is the initial payload.
+  const rawData = new Uint8Array(streamBuffer.slice(reader.offset));
+
   return {
-    isUDP: command === 2,
+    version,
+    protocol,
     address,
     port,
-    rawData: new Uint8Array(streamBuffer.slice(reader.offset)),
-    vlessVersion: version,
+    rawData,
   };
 }
 

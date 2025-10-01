@@ -5,7 +5,7 @@
 
 import { config } from '../lib/config.js';
 import { logger } from '../lib/logger.js';
-import { WS_READY_STATE } from '../lib/utils.js';
+import { safeCloseWebSocket } from '../lib/utils.js';
 
 /**
  * Handles UDP proxying by transforming VLESS UDP packets into DNS queries
@@ -17,10 +17,13 @@ import { WS_READY_STATE } from '../lib/utils.js';
  */
 export async function handleUdpProxy(webSocket, consumableStream, vlessVersion, logContext) {
   const udpLogContext = { ...logContext, section: 'UDP_PROXY' };
-  let isVlessHeaderSent = false;
+
+  // Send the VLESS response header immediately for consistency.
+  // This signals to the client that the proxy is ready.
+  webSocket.send(new Uint8Array([vlessVersion[0], 0]));
 
   // Transform stream to parse VLESS UDP packet format.
-  // VLESS UDP format: [2-byte length][payload]
+  // Incoming VLESS UDP format: [2-byte length][DNS payload]
   const vlessUdpParser = new TransformStream({
     transform(chunk, controller) {
       for (let offset = 0; offset < chunk.byteLength; ) {
@@ -41,17 +44,18 @@ export async function handleUdpProxy(webSocket, consumableStream, vlessVersion, 
     },
   });
 
-  consumableStream
-    .pipeTo(
+  // The client's stream is piped through the parser, and the parser's
+  // output is then piped to our DoH handler.
+  try {
+    await consumableStream.pipeThrough(vlessUdpParser).pipeTo(
       new WritableStream({
-        async write(chunk) {
-          const transformedChunk = await new Response(chunk).arrayBuffer(); // This is a bit of a hack to ensure ArrayBuffer
-          logger.debug(udpLogContext, 'UDP:DOH_REQUEST', 'Sending DNS query via DoH.');
+        async write(dnsQuery) {
           try {
+            logger.debug(udpLogContext, 'UDP:DOH_REQUEST', 'Sending DNS query via DoH.');
             const response = await fetch(config.DOH_URL, {
               method: 'POST',
               headers: { 'content-type': 'application/dns-message' },
-              body: transformedChunk,
+              body: dnsQuery,
             });
 
             if (!response.ok) {
@@ -61,41 +65,29 @@ export async function handleUdpProxy(webSocket, consumableStream, vlessVersion, 
 
             const dnsResult = await response.arrayBuffer();
             const resultSize = dnsResult.byteLength;
-            // Format response back into VLESS UDP packet format.
-            const sizeBuffer = new Uint8Array([(resultSize >> 8) & 0xff, resultSize & 0xff]);
 
-            if (webSocket.readyState === WS_READY_STATE.OPEN) {
-              if (!isVlessHeaderSent) {
-                const vlessHeader = new Uint8Array([vlessVersion[0], 0]);
-                const combined = new Uint8Array(vlessHeader.length + sizeBuffer.length + resultSize);
-                combined.set(vlessHeader, 0);
-                combined.set(sizeBuffer, vlessHeader.length);
-                combined.set(new Uint8Array(dnsResult), vlessHeader.length + sizeBuffer.length);
-                webSocket.send(combined);
-                isVlessHeaderSent = true;
-              } else {
-                const combined = new Uint8Array(sizeBuffer.length + resultSize);
-                combined.set(sizeBuffer, 0);
-                combined.set(new Uint8Array(dnsResult), sizeBuffer.length);
-                webSocket.send(combined);
-              }
-            }
+            // Format response back into VLESS UDP packet format: [2-byte length][DNS payload]
+            const sizeBuffer = new Uint8Array([(resultSize >> 8) & 0xff, resultSize & 0xff]);
+            const combinedResponse = new Uint8Array(sizeBuffer.length + resultSize);
+            combinedResponse.set(sizeBuffer, 0);
+            combinedResponse.set(new Uint8Array(dnsResult), sizeBuffer.length);
+
+            webSocket.send(combinedResponse);
           } catch (error) {
             logger.error(udpLogContext, 'UDP:DOH_FETCH_ERROR', 'Error fetching DoH:', error);
           }
         },
         close() {
-          logger.info(udpLogContext, 'UDP:CLOSE', 'UDP input stream closed.');
+          logger.info(udpLogContext, 'UDP:CLOSE', 'Client UDP stream closed.');
         },
         abort(reason) {
-          logger.warn(udpLogContext, 'UDP:ABORT', 'UDP input stream aborted:', reason);
+          logger.warn(udpLogContext, 'UDP:ABORT', 'Client UDP stream aborted:', reason);
         },
       })
-    )
-    .catch((error) => {
-      logger.error(udpLogContext, 'UDP:PIPE_ERROR', 'Error in UDP processing pipe:', error);
-    });
-
-  // Pipe the client's data through the VLESS UDP parser
-  consumableStream.pipeThrough(vlessUdpParser).pipeTo(vlessUdpParser.writable);
+    );
+  } catch (error) {
+    logger.error(udpLogContext, 'UDP:PIPE_ERROR', 'Error in UDP processing pipe:', error);
+  } finally {
+    safeCloseWebSocket(webSocket, udpLogContext);
+  }
 }

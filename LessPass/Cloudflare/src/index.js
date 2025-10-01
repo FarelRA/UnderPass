@@ -13,12 +13,12 @@ export default {
    * Cloudflare Worker fetch handler.
    */
   async fetch(request, env) {
+    const url = new URL(request.url);
     const logId = generateLogId();
     const clientIP = request.headers.get('CF-Connecting-IP') || 'N/A';
     const logContext = { logId, clientIP, section: 'WORKER' };
 
     try {
-      const url = new URL(request.url);
       initializeConfig(url, env);
       logger.setLogLevel(config.LOG_LEVEL);
 

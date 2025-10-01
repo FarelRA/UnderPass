@@ -22,18 +22,18 @@ function handleInfoRequest(request, env, url, logContext) {
 
   const info = {
     status: 'OK',
+    request: {
+      method: request.method,
+      url: request.url,
+      headers: Object.fromEntries(request.headers.entries()),
+      cf: request.cf,
+    },
     config: {
       USER_ID: config.USER_ID,
       RELAY_ADDR: config.RELAY_ADDR,
       DOH_URL: config.DOH_URL,
       LOG_LEVEL: config.LOG_LEVEL,
       PASSWORD: config.PASSWORD,
-    },
-    request: {
-      method: request.method,
-      url: request.url,
-      headers: Object.fromEntries(request.headers.entries()),
-      cf: request.cf,
     },
     env: {
       USER_ID: env.USER_ID,
@@ -62,9 +62,19 @@ export async function handleHttpRequest(request, env, logContext) {
     return handleInfoRequest(request, env, url, httpLogContext);
   }
 
-  logger.info(httpLogContext, 'MASQUERADE', 'Returning 404 Not Found (masquerade).');
+  logger.info(httpLogContext, 'MASQUERADE', 'Returning 404 Not Found.');
   return new Response(
-    '<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>',
+    `<!DOCTYPE html>
+    <html>
+      <head>
+        <title>404 Not Found</title>
+      </head>
+      <body>
+        <center><h1>404 Not Found</h1></center>
+        <hr>
+        <center>nginx</center>
+      </body>
+    </html>`,
     { status: 404, headers: { 'Content-Type': 'text/html' } }
   );
 }
