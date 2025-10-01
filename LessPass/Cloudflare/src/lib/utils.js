@@ -37,6 +37,47 @@ function createBufferReader(buffer) {
 }
 
 /**
+ * Creates a ReadableStream from a WebSocket, bridging the event-based API
+ * to the modern Streams API.
+ * @param {WebSocket} webSocket - The server-side WebSocket.
+ * @param {object} logContext - Logging context.
+ * @returns {ReadableStream}
+ */
+export function makeReadableWebSocketStream(webSocket, logContext) {
+  let readableStreamCancel = false;
+  return new ReadableStream({
+    start(controller) {
+      webSocket.addEventListener('message', (event) => {
+        if (readableStreamCancel) return;
+        // Ensure data is in a consistent Uint8Array format
+        const data = event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : event.data;
+        controller.enqueue(data);
+      });
+      webSocket.addEventListener('close', () => {
+        if (readableStreamCancel) return;
+        try {
+          controller.close();
+        } catch (e) {
+          // Suppress errors if the stream is already closed.
+        }
+      });
+      webSocket.addEventListener('error', (err) => {
+        logger.error(logContext, 'WEBSOCKET_STREAM_ERROR', 'WebSocket error:', err);
+        controller.error(err);
+      });
+    },
+    pull() {
+      // Backpressure is not implemented as WebSocket events are push-based.
+    },
+    cancel(reason) {
+      if (readableStreamCancel) return;
+      readableStreamCancel = true;
+      safeCloseWebSocket(webSocket, logContext);
+    },
+  });
+}
+
+/**
  * Safely closes a WebSocket connection, ignoring errors if it's already closing or closed.
  * @param {WebSocket} socket - The WebSocket to close.
  * @param {object} logContext - Logging context.
