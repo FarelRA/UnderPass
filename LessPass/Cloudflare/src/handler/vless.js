@@ -31,7 +31,10 @@ async function processVlessConnection(server, request, logContext) {
       throw new Error('No data received from client after connection.');
     }
 
-    const headerInfo = processVlessHeader(firstChunk);
+    // The `firstChunk` is a Uint8Array. The `processVlessHeader` function
+    // expects an ArrayBuffer to create a DataView.
+    // We must pass the underlying buffer of the Uint8Array.
+    const headerInfo = processVlessHeader(firstChunk.buffer);
     if (headerInfo.error) {
       throw new Error(headerInfo.error);
     }
