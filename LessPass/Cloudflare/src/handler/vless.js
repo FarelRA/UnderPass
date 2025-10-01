@@ -4,76 +4,79 @@
 // =================================================================
 
 import { logger } from '../lib/logger.js';
-import { processVlessHeader, createConsumableStream, makeReadableWebSocketStream } from '../lib/utils.js';
+import {
+  processVlessHeader,
+  stringifyUUID,
+  createConsumableStream,
+  makeReadableWebSocketStream,
+  safeCloseWebSocket,
+} from '../lib/utils.js';
 import { handleTcpProxy } from '../protocol/tcp.js';
 import { handleUdpProxy } from '../protocol/udp.js';
 
 /**
- * This function runs in the background after the WebSocket handshake is complete.
- * It reads the VLESS header and orchestrates the connection.
- * @param {WebSocket} server - The server-side of the WebSocketPair.
- * @param {Request} request - The original incoming request.
- * @param {object} logContext - The logging context.
- */
-async function processVlessConnection(server, request, logContext) {
-  try {
-    const earlyDataHeader = request.headers.get('Sec-WebSocket-Protocol') || '';
-
-    // Create the stream atomically, passing the early data header to the utility.
-    const webSocketStream = makeReadableWebSocketStream(server, earlyDataHeader, logContext);
-    const reader = webSocketStream.getReader();
-
-    // Now this is safe. The stream will provide the first chunk from either
-    // early data or the first message, with no chance of loss.
-    const firstChunk = (await reader.read()).value;
-
-    if (!firstChunk) {
-      throw new Error('No data received from client after connection.');
-    }
-
-    // The `firstChunk` is a Uint8Array. The `processVlessHeader` function
-    // expects an ArrayBuffer to create a DataView.
-    // We must pass the underlying buffer of the Uint8Array.
-    const headerInfo = processVlessHeader(firstChunk.buffer);
-    if (headerInfo.error) {
-      throw new Error(headerInfo.error);
-    }
-
-    const { version, protocol, address, port, rawData } = headerInfo;
-    logContext.remoteAddress = address;
-    logContext.remotePort = port;
-    logger.info(logContext, 'CONNECTION', `Processing ${protocol} request for ${address}:${port}`);
-
-    // Reconstitute the full stream (initial data payload + rest of the stream).
-    const consumableStream = createConsumableStream(reader, rawData);
-
-    if (isUDP) {
-      if (port !== 53) {
-        throw new Error('UDP is only supported for DNS on port 53.');
-      }
-      handleUdpProxy(server, consumableStream, version, logContext);
-    } else {
-      handleTcpProxy(server, consumableStream, address, port, version, logContext);
-    }
-  } catch (err) {
-    logger.error(logContext, 'ERROR', 'Error in VLESS connection processing:', err.stack || err);
-    server.close(1011, 'Failed to process VLESS request.');
-  }
-}
-
-/**
  * Orchestrates an incoming VLESS WebSocket request.
- * This function's primary job is to complete the WebSocket handshake immediately.
+ * @param {Request} request The original incoming request.
+ * @param {object} config The request-scoped configuration.
+ * @param {object} logContext The logging context.
+ * @returns {Response} A 101 Switching Protocols response.
  */
-export function handleVlessRequest(request, logContext) {
-  const vlessLogContext = { ...logContext, section: 'VLESS_ORCHESTRATOR' };
+export function handleVlessRequest(request, config, logContext) {
+  const vlessLogContext = { ...logContext, section: 'VLESS' };
   const { 0: client, 1: server } = new WebSocketPair();
   server.accept();
 
-  // "Fire-and-forget" the connection processing.
-  // This lets it run in the background without blocking the response.
-  processVlessConnection(server, request, vlessLogContext);
+  // Process the connection in the background without blocking the handshake response.
+  processVlessConnection(server, request, config, vlessLogContext).catch((err) => {
+    logger.error(vlessLogContext, 'UNHANDLED_PROCESS_ERROR', 'Unhandled error in VLESS processing:', err);
+    safeCloseWebSocket(server, vlessLogContext);
+  });
 
-  // Immediately return the 101 response to complete the handshake.
+  // Immediately return the 101 response to complete the WebSocket handshake.
   return new Response(null, { status: 101, webSocket: client });
+}
+
+/**
+ * Reads the VLESS header, validates the user, and dispatches to the correct protocol handler.
+ * @param {WebSocket} server The server-side of the WebSocketPair.
+ * @param {Request} request The original incoming request.
+ * @param {object} config The request-scoped configuration.
+ * @param {object} logContext The logging context.
+ */
+async function processVlessConnection(server, request, config, logContext) {
+  const earlyDataHeader = request.headers.get('Sec-WebSocket-Protocol') || '';
+  const webSocketStream = makeReadableWebSocketStream(server, earlyDataHeader, logContext);
+  const reader = webSocketStream.getReader();
+
+  const { value: firstChunk, done } = await reader.read();
+  if (done || !firstChunk) {
+    throw new Error('No data received from client after connection.');
+  }
+
+  const headerInfo = processVlessHeader(firstChunk);
+  if (headerInfo.error) {
+    throw new Error(headerInfo.error);
+  }
+
+  const { vlessVersion, userID, protocol, address, port, payload } = headerInfo;
+
+  if (stringifyUUID(userID) !== config.USER_ID) {
+    throw new Error('Invalid user ID.');
+  }
+
+  logContext.remoteAddress = address;
+  logContext.remotePort = port;
+  logger.info(logContext, 'CONNECTION', `Processing ${protocol} request for ${address}:${port}`);
+
+  // Reconstitute the full stream (initial data payload + rest of the stream).
+  const consumableStream = createConsumableStream(reader, payload);
+
+  if (protocol === 'UDP') {
+    if (port !== 53) {
+      throw new Error('UDP is only supported for DNS on port 53.');
+    }
+    await handleUdpProxy(server, consumableStream, vlessVersion, config, logContext);
+  } else {
+    await handleTcpProxy(server, consumableStream, address, port, vlessVersion, config, logContext);
+  }
 }
