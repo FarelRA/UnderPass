@@ -39,10 +39,9 @@ async function processVlessConnection(server, request, logContext) {
       throw new Error(headerInfo.error);
     }
 
-    const { isUDP, address, port, rawData, vlessVersion } = headerInfo;
+    const { version, protocol, address, port, rawData } = headerInfo;
     logContext.remoteAddress = address;
     logContext.remotePort = port;
-    const protocol = isUDP ? 'UDP' : 'TCP';
     logger.info(logContext, 'CONNECTION', `Processing ${protocol} request for ${address}:${port}`);
 
     // Reconstitute the full stream (initial data payload + rest of the stream).
@@ -52,9 +51,9 @@ async function processVlessConnection(server, request, logContext) {
       if (port !== 53) {
         throw new Error('UDP is only supported for DNS on port 53.');
       }
-      handleUdpProxy(server, consumableStream, vlessVersion, logContext);
+      handleUdpProxy(server, consumableStream, version, logContext);
     } else {
-      handleTcpProxy(server, consumableStream, address, port, vlessVersion, logContext);
+      handleTcpProxy(server, consumableStream, address, port, version, logContext);
     }
   } catch (err) {
     logger.error(logContext, 'ERROR', 'Error in VLESS connection processing:', err.stack || err);
