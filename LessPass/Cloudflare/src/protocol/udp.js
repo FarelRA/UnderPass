@@ -1,29 +1,26 @@
 // =================================================================
 // File: protocol/udp.js
-// Description: The UDP Actor. Handles proxying UDP via DNS-over-HTTPS.
+// Description: Handles proxying UDP via DNS-over-HTTPS.
 // =================================================================
 
-import { config } from '../lib/config.js';
 import { logger } from '../lib/logger.js';
 import { safeCloseWebSocket } from '../lib/utils.js';
 
 /**
  * Handles UDP proxying by transforming VLESS UDP packets into DNS queries
  * sent over HTTPS (DoH). This is specifically for DNS traffic (port 53).
- * @param {WebSocket} webSocket
- * @param {ReadableStream} consumableStream - The client data stream.
- * @param {Uint8Array} vlessVersion - VLESS version bytes.
- * @param {object} logContext - Logging context.
+ * @param {WebSocket} webSocket The client WebSocket.
+ * @param {ReadableStream} consumableStream The client data stream.
+ * @param {Uint8Array} vlessVersion VLESS version bytes.
+ * @param {object} config The request-scoped configuration.
+ * @param {object} logContext Logging context.
  */
-export async function handleUdpProxy(webSocket, consumableStream, vlessVersion, logContext) {
+export async function handleUdpProxy(webSocket, consumableStream, vlessVersion, config, logContext) {
   const udpLogContext = { ...logContext, section: 'UDP_PROXY' };
 
-  // Send the VLESS response header immediately for consistency.
-  // This signals to the client that the proxy is ready.
   webSocket.send(new Uint8Array([vlessVersion[0], 0]));
 
-  // Transform stream to parse VLESS UDP packet format.
-  // Incoming VLESS UDP format: [2-byte length][DNS payload]
+  // Create a TransformStream to parse the VLESS UDP format: [2-byte length][DNS payload]
   const vlessUdpParser = new TransformStream({
     transform(chunk, controller) {
       for (let offset = 0; offset < chunk.byteLength; ) {
@@ -37,15 +34,12 @@ export async function handleUdpProxy(webSocket, consumableStream, vlessVersion, 
           logger.warn(udpLogContext, 'UDP:PARSE', 'Incomplete UDP packet payload.');
           break;
         }
-        const payload = chunk.slice(offset, offset + length);
-        controller.enqueue(payload);
+        controller.enqueue(chunk.slice(offset, offset + length));
         offset += length;
       }
     },
   });
 
-  // The client's stream is piped through the parser, and the parser's
-  // output is then piped to our DoH handler.
   try {
     await consumableStream.pipeThrough(vlessUdpParser).pipeTo(
       new WritableStream({
@@ -59,22 +53,20 @@ export async function handleUdpProxy(webSocket, consumableStream, vlessVersion, 
             });
 
             if (!response.ok) {
-              logger.error(udpLogContext, 'UDP:DOH_ERROR', `DoH request failed with status: ${response.status}`);
-              return;
+              throw new Error(`DoH request failed with status: ${response.status}`);
             }
 
-            const dnsResult = await response.arrayBuffer();
+            const dnsResultBuffer = await response.arrayBuffer();
+            const dnsResult = new Uint8Array(dnsResultBuffer);
             const resultSize = dnsResult.byteLength;
 
-            // Format response back into VLESS UDP packet format: [2-byte length][DNS payload]
-            const sizeBuffer = new Uint8Array([(resultSize >> 8) & 0xff, resultSize & 0xff]);
-            const combinedResponse = new Uint8Array(sizeBuffer.length + resultSize);
-            combinedResponse.set(sizeBuffer, 0);
-            combinedResponse.set(new Uint8Array(dnsResult), sizeBuffer.length);
-
-            webSocket.send(combinedResponse);
+            // Format response back into VLESS UDP packet format
+            const responsePacket = new Uint8Array(2 + resultSize);
+            new DataView(responsePacket.buffer).setUint16(0, resultSize);
+            responsePacket.set(dnsResult, 2);
+            webSocket.send(responsePacket);
           } catch (error) {
-            logger.error(udpLogContext, 'UDP:DOH_FETCH_ERROR', 'Error fetching DoH:', error);
+            logger.error(udpLogContext, 'UDP:DOH_FETCH_ERROR', 'Error during DoH fetch:', error);
           }
         },
         close() {

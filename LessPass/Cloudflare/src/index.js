@@ -3,35 +3,38 @@
 // Description: Main Cloudflare Worker entry point.
 // =================================================================
 
-import { config, initializeConfig } from './lib/config.js';
+import { initializeConfig } from './lib/config.js';
 import { logger, generateLogId } from './lib/logger.js';
 import { handleHttpRequest } from './handler/http.js';
 import { handleVlessRequest } from './handler/vless.js';
 
 export default {
   /**
-   * Cloudflare Worker fetch handler.
+   * Main fetch handler for the Cloudflare Worker.
+   * @param {Request} request The incoming request.
+   * @param {object} env The environment variables.
+   * @returns {Promise<Response>}
    */
   async fetch(request, env) {
-    const url = new URL(request.url);
     const logId = generateLogId();
     const clientIP = request.headers.get('CF-Connecting-IP') || 'N/A';
-    const logContext = { logId, clientIP, section: 'WORKER' };
+    const logContext = { logId, clientIP };
 
     try {
-      initializeConfig(url, env);
+      // Initialize a request-scoped configuration. This avoids global mutable state.
+      const config = initializeConfig(new URL(request.url), env);
       logger.setLogLevel(config.LOG_LEVEL);
 
       const upgradeHeader = request.headers.get('Upgrade');
       if (upgradeHeader === 'websocket') {
-        logger.info(logContext, 'ROUTING', 'Handling WebSocket (VLESS) request.');
-        return await handleVlessRequest(request, logContext);
+        logger.info({ ...logContext, section: 'WORKER' }, 'ROUTING', 'Handling WebSocket (VLESS) request.');
+        return handleVlessRequest(request, config, logContext);
       } else {
-        logger.info(logContext, 'ROUTING', 'Handling standard HTTP request.');
-        return await handleHttpRequest(request, env, logContext);
+        logger.info({ ...logContext, section: 'WORKER' }, 'ROUTING', 'Handling standard HTTP request.');
+        return handleHttpRequest(request, env, config, logContext);
       }
     } catch (err) {
-      logger.error(logContext, 'FATAL', 'Unhandled top-level error:', err.stack || err);
+      logger.error({ ...logContext, section: 'WORKER' }, 'FATAL', 'Unhandled top-level error:', err.stack || err);
       return new Response('Internal Server Error', { status: 500 });
     }
   },

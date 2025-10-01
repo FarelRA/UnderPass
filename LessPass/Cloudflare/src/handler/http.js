@@ -4,13 +4,17 @@
 // =================================================================
 
 import { logger } from '../lib/logger.js';
-import { config } from '../lib/config.js';
 
 /**
  * Handles requests to the "/info" endpoint, providing diagnostic information.
- * Requires Basic Authentication.
+ * Requires Basic Authentication using the configured password.
+ * @param {Request} request The incoming request.
+ * @param {object} env The environment variables.
+ * @param {object} config The request-scoped configuration.
+ * @param {object} logContext Logging context.
+ * @returns {Response}
  */
-function handleInfoRequest(request, env, url, logContext) {
+function handleInfoRequest(request, env, config, logContext) {
   const authHeader = request.headers.get('Authorization');
   if (!authHeader || authHeader !== `Basic ${btoa(':' + config.PASSWORD)}`) {
     logger.warn(logContext, 'HTTP:AUTH_FAIL', 'Unauthorized access attempt to /info.');
@@ -28,20 +32,8 @@ function handleInfoRequest(request, env, url, logContext) {
       headers: Object.fromEntries(request.headers.entries()),
       cf: request.cf,
     },
-    config: {
-      USER_ID: config.USER_ID,
-      RELAY_ADDR: config.RELAY_ADDR,
-      DOH_URL: config.DOH_URL,
-      LOG_LEVEL: config.LOG_LEVEL,
-      PASSWORD: config.PASSWORD,
-    },
-    env: {
-      USER_ID: env.USER_ID,
-      RELAY_ADDR: env.RELAY_ADDR,
-      DOH_URL: env.DOH_URL,
-      PASSWORD: env.PASSWORD,
-      LOG_LEVEL: env.LOG_LEVEL,
-    },
+    config,
+    env,
   };
 
   return new Response(JSON.stringify(info, null, 2), {
@@ -52,29 +44,24 @@ function handleInfoRequest(request, env, url, logContext) {
 
 /**
  * Main HTTP request handler. Routes to the info endpoint or returns a
- * masquerading 404 page.
+ * masquerading 404 page for all other paths.
+ * @param {Request} request The incoming request.
+ * @param {object} env The environment variables.
+ * @param {object} config The request-scoped configuration.
+ * @param {object} logContext Logging context.
+ * @returns {Promise<Response>}
  */
-export async function handleHttpRequest(request, env, logContext) {
+export async function handleHttpRequest(request, env, config, logContext) {
   const url = new URL(request.url);
   const httpLogContext = { ...logContext, section: 'HTTP' };
 
   if (url.pathname.endsWith('/info')) {
-    return handleInfoRequest(request, env, url, httpLogContext);
+    return handleInfoRequest(request, env, config, httpLogContext);
   }
 
   logger.info(httpLogContext, 'MASQUERADE', 'Returning 404 Not Found.');
   return new Response(
-    `<!DOCTYPE html>
-    <html>
-      <head>
-        <title>404 Not Found</title>
-      </head>
-      <body>
-        <center><h1>404 Not Found</h1></center>
-        <hr>
-        <center>nginx</center>
-      </body>
-    </html>`,
+    `<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>`,
     { status: 404, headers: { 'Content-Type': 'text/html' } }
   );
 }

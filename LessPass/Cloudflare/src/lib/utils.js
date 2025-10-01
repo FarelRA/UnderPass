@@ -3,80 +3,67 @@
 // Description: Shared utilities for VLESS parsing, stream manipulation, and WebSockets.
 // =================================================================
 
-import { byteToHex, VLESS } from '../lib/config.js';
-import { logger } from '../lib/logger.js';
+import { byteToHex, VLESS, WS_READY_STATE } from './config.js';
+import { logger } from './logger.js';
 
-function createBufferReader(buffer) {
-  const view = new DataView(buffer);
-  let offset = 0;
-  return {
-    get offset() {
-      return offset;
-    },
-    readUint8() {
-      const value = view.getUint8(offset);
-      offset += 1;
-      return value;
-    },
-    readUint16() {
-      const value = view.getUint16(offset);
-      offset += 2;
-      return value;
-    },
-    readBytes(length) {
-      const value = new Uint8Array(buffer, offset, length);
-      offset += length;
-      return value;
-    },
-    skip(length) {
-      offset += length;
-    },
-  };
+/**
+ * Decodes a base64 string (URL-safe) to a Uint8Array.
+ * @param {string} base64Str The base64-encoded string.
+ * @returns {{data: Uint8Array | null, error: Error | null}}
+ */
+export function base64ToUint8Array(base64Str) {
+  if (!base64Str) {
+    return { data: null, error: null };
+  }
+  try {
+    const padded = base64Str.replace(/-/g, '+').replace(/_/g, '/') + '=='.substring(0, (3 * base64Str.length) % 4);
+    const decoded = atob(padded);
+    const uint8Array = new Uint8Array(decoded.length);
+    for (let i = 0; i < decoded.length; ++i) {
+      uint8Array[i] = decoded.charCodeAt(i);
+    }
+    return { data: uint8Array, error: null };
+  } catch (error) {
+    return { data: null, error };
+  }
 }
 
 /**
  * Creates a ReadableStream from a WebSocket, atomically handling early data
  * and subsequent messages to prevent race conditions.
- * @param {WebSocket} webSocket - The server-side WebSocket.
- * @param {string} earlyDataHeader - The base64-encoded early data.
- * @param {object} logContext - Logging context.
+ * @param {WebSocket} webSocket The server-side WebSocket.
+ * @param {string} earlyDataHeader The base64-encoded early data from the 'Sec-WebSocket-Protocol' header.
+ * @param {object} logContext Logging context.
  * @returns {ReadableStream}
  */
 export function makeReadableWebSocketStream(webSocket, earlyDataHeader, logContext) {
   let readableStreamCancel = false;
   return new ReadableStream({
     start(controller) {
-      // Attach listeners for subsequent messages.
       webSocket.addEventListener('message', (event) => {
         if (readableStreamCancel) return;
-        // Ensure data is in a consistent Uint8Array format
-        const data = event.data instanceof ArrayBuffer ? new Uint8Array(event.data) : event.data;
-        controller.enqueue(data);
+        controller.enqueue(new Uint8Array(event.data));
       });
       webSocket.addEventListener('close', () => {
         if (readableStreamCancel) return;
         try {
           controller.close();
         } catch (e) {
-          /* Ignore */
+          logger.warn(logContext, 'WEBSOCKET_STREAM', 'Controller already closed.', e);
         }
       });
-      webSocket.addEventListener('error', (err) => {
-        logger.error(logContext, 'WEBSOCKET_STREAM_ERROR', 'WebSocket error:', err);
-        controller.error(err);
-      });
+      webSocket.addEventListener('error', (err) => controller.error(err));
 
-      // Immediately process and enqueue early data if it exists.
-      // This happens in the same synchronous step as attaching listeners.
-      const { earlyData, error } = base64ToArrayBuffer(earlyDataHeader);
+      // Atomically process and enqueue early data if it exists.
+      const { data, error } = base64ToUint8Array(earlyDataHeader);
       if (error) {
         controller.error(new Error('Failed to decode early data.'));
-      } else if (earlyData) {
-        controller.enqueue(new Uint8Array(earlyData));
+      } else if (data) {
+        controller.enqueue(data);
       }
     },
     pull() {
-      /* No backpressure needed */
+      /* Backpressure is not needed */
     },
     cancel() {
       if (readableStreamCancel) return;
@@ -87,138 +74,84 @@ export function makeReadableWebSocketStream(webSocket, earlyDataHeader, logConte
 }
 
 /**
- * Safely closes a WebSocket connection, ignoring errors if it's already closing or closed.
- * @param {WebSocket} socket - The WebSocket to close.
- * @param {object} logContext - Logging context.
+ * Processes the VLESS protocol header from a Uint8Array.
+ * @param {Uint8Array} chunk The initial data chunk from the client.
+ * @returns {{vlessVersion: Uint8Array, protocol: string, address: string, port: number, payload: Uint8Array, error: string | null}}
  */
-export function safeCloseWebSocket(socket, logContext) {
-  try {
-    if (socket.readyState === WS_READY_STATE.OPEN || socket.readyState === WS_READY_STATE.CLOSING) {
-      socket.close(1000, 'Connection closed by worker.');
-    }
-  } catch (error) {
-    logger.error(logContext, 'safeCloseWebSocket', 'Error closing WebSocket:', error);
-  }
-}
-
-/**
- * Decodes a base64 string (URL-safe) to an ArrayBuffer.
- * @param {string} base64Str - The base64-encoded string.
- * @returns {{earlyData: ArrayBuffer | null, error: Error | null}}
- */
-export function base64ToArrayBuffer(base64Str) {
-  if (!base64Str) {
-    return { earlyData: null, error: null };
-  }
-  try {
-    base64Str = base64Str.replace(/-/g, '+').replace(/_/g, '/');
-    const decode = atob(base64Str);
-    const arryBuffer = Uint8Array.from(decode, (c) => c.charCodeAt(0));
-    return { earlyData: arryBuffer.buffer, error: null };
-  } catch (error) {
-    return { earlyData: null, error };
-  }
-}
-
-/**
- * Processes the VLESS protocol header from a buffer.
- * @param {ArrayBuffer} streamBuffer - The buffer containing the protocol header.
- * @param {string} expectedUserID - The expected UUID string for validation.
- * @returns {{version: number, protocol: string, address: string, port: number, rawData: Uint8Array} | {error: string}} An object containing the extracted destination info, or an error.
- */
-export function processVlessHeader(streamBuffer, expectedUserID) {
-  if (streamBuffer.byteLength < VLESS.MIN_HEADER_LENGTH) {
-    return { error: `Invalid VLESS header: insufficient length. Expected at least ${VLESS.MIN_HEADER_LENGTH} bytes.` };
+export function processVlessHeader(chunk) {
+  if (chunk.byteLength < VLESS.MIN_HEADER_LENGTH) {
+    return { error: `Invalid VLESS header: insufficient length. Got ${chunk.byteLength}, expected at least ${VLESS.MIN_HEADER_LENGTH}.` };
   }
 
-  // A helper function to read from the buffer.
-  const reader = createBufferReader(streamBuffer);
+  const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+  let offset = 0;
 
-  // VLESS Header Structure:
-  // 1. Version (1 byte)
-  const version = reader.readUint8();
+  const vlessVersion = chunk.slice(offset, VLESS.VERSION_LENGTH);
+  offset += VLESS.VERSION_LENGTH;
 
-  // 2. User ID (16 bytes)
-  const userIDBytes = reader.readBytes(VLESS.USERID_LENGTH);
-  // A helper function to format the UUID bytes is assumed to exist.
-  if (stringifyUUID(userIDBytes) !== expectedUserID) {
-    return { error: 'Invalid user ID.' };
-  }
+  const userID = chunk.slice(offset, offset + VLESS.USERID_LENGTH);
+  offset += VLESS.USERID_LENGTH;
 
-  // 3. Addons (1 byte length + length bytes)
-  const addonLength = reader.readUint8();
-  reader.skip(addonLength);
+  const addonLength = view.getUint8(offset);
+  offset += 1 + addonLength; // Skip addon section
 
-  // 4. Command (1 byte)
-  const command = reader.readUint8();
+  const command = view.getUint8(offset);
+  offset += 1;
+
   let protocol;
-  switch (command) {
-    case VLESS.COMMAND.TCP:
-      protocol = 'TCP';
-      break;
+  if (command === VLESS.COMMAND.TCP) protocol = 'TCP';
+  else if (command === VLESS.COMMAND.UDP) protocol = 'UDP';
+  else return { error: `Unsupported VLESS command: ${command}` };
 
-    case VLESS.COMMAND.UDP:
-      protocol = 'UDP';
-      break;
+  const port = view.getUint16(offset);
+  offset += 2;
 
-    default:
-      return { error: `Unsupported VLESS command: ${command}` };
-  }
-
-  // 5. Port (2 bytes, Big Endian)
-  const port = reader.readUint16();
-
-  // 6. Address Type (1 byte) and Address (variable length)
-  const addressType = reader.readUint8();
+  const addressType = view.getUint8(offset);
+  offset += 1;
   let address;
 
   switch (addressType) {
-    case VLESS.ADDRESS_TYPE.IPV4: // 4 bytes
-      address = reader.readBytes(4).join('.');
+    case VLESS.ADDRESS_TYPE.IPV4:
+      address = Array.from(chunk.slice(offset, offset + 4)).join('.');
+      offset += 4;
       break;
-
-    case VLESS.ADDRESS_TYPE.FQDN: // 1 byte length + length bytes
-      const domainLength = reader.readUint8();
-      address = new TextDecoder().decode(reader.readBytes(domainLength));
+    case VLESS.ADDRESS_TYPE.FQDN:
+      const domainLength = view.getUint8(offset);
+      offset += 1;
+      address = new TextDecoder().decode(chunk.slice(offset, offset + domainLength));
+      offset += domainLength;
       break;
-
-    case VLESS.ADDRESS_TYPE.IPV6: // 16 bytes
-      const ipv6Bytes = reader.readBytes(16);
-      const view = new DataView(ipv6Bytes.buffer, ipv6Bytes.byteOffset);
-      const parts = Array.from({ length: 8 }, (_, i) => view.getUint16(i * 2).toString(16));
-      address = `[${parts.join(':')}]`;
+    case VLESS.ADDRESS_TYPE.IPV6:
+      const ipv6Bytes = chunk.slice(offset, offset + 16);
+      const parts = [];
+      for (let i = 0; i < 8; i++) {
+        parts.push(view.getUint16(offset + i * 2).toString(16));
+      }
+      address = `[${parts.join(':').replace(/:(:0)+:0/g, '::')}]`;
+      offset += 16;
       break;
-
     default:
       return { error: `Invalid address type: ${addressType}` };
   }
 
-  // The rest of the buffer is the initial payload.
-  const rawData = new Uint8Array(streamBuffer.slice(reader.offset));
+  const payload = chunk.slice(offset);
 
-  return {
-    version,
-    protocol,
-    address,
-    port,
-    rawData,
-  };
+  return { vlessVersion, userID, protocol, address, port, payload, error: null };
 }
 
 /**
- * Creates a ReadableStream that combines a single initial chunk with the rest of a reader's stream.
- * This is useful for "peeking" at the start of a stream and then passing the full, reconstituted stream on.
- * @param {ReadableStreamDefaultReader} reader - The reader of the original stream.
- * @param {Uint8Array} initialChunk - The data that was already read.
+ * Creates a stream that can be consumed again after peeking at its first chunk.
+ * @param {ReadableStreamDefaultReader} reader The reader of the original stream.
+ * @param {Uint8Array} initialChunk The data that was already read.
  * @returns {ReadableStream}
  */
 export function createConsumableStream(reader, initialChunk) {
-  let initialChunkSent = false;
+  let isInitialChunkSent = false;
   return new ReadableStream({
     async pull(controller) {
-      if (!initialChunkSent) {
+      if (!isInitialChunkSent) {
         controller.enqueue(initialChunk);
-        initialChunkSent = true;
+        isInitialChunkSent = true;
       }
       const { value, done } = await reader.read();
       if (done) {
@@ -234,7 +167,22 @@ export function createConsumableStream(reader, initialChunk) {
 }
 
 /**
- * Converts a Uint8Array to a UUID string.
+ * Safely closes a WebSocket connection.
+ * @param {WebSocket} socket The WebSocket to close.
+ * @param {object} logContext Logging context.
+ */
+export function safeCloseWebSocket(socket, logContext) {
+  try {
+    if (socket.readyState === WS_READY_STATE.OPEN || socket.readyState === WS_READY_STATE.CLOSING) {
+      socket.close(1000, 'Connection closed by worker.');
+    }
+  } catch (error) {
+    logger.error(logContext, 'safeCloseWebSocket', 'Error closing WebSocket:', error);
+  }
+}
+
+/**
+ * Converts a Uint8Array UUID to its string representation.
  * @param {Uint8Array} arr
  * @returns {string}
  */
