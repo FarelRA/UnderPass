@@ -4,7 +4,7 @@
 // =================================================================
 
 import { logger } from '../lib/logger.js';
-import { base64ToArrayBuffer, processVlessHeader, createConsumableStream, makeReadableWebSocketStream } from '../lib/utils.js';
+import { processVlessHeader, createConsumableStream, makeReadableWebSocketStream } from '../lib/utils.js';
 import { handleTcpProxy } from '../protocol/tcp.js';
 import { handleUdpProxy } from '../protocol/udp.js';
 
@@ -17,13 +17,16 @@ import { handleUdpProxy } from '../protocol/udp.js';
  */
 async function processVlessConnection(server, request, logContext) {
   try {
-    const webSocketStream = makeReadableWebSocketStream(server, logContext);
-    const reader = webSocketStream.getReader();
     const earlyDataHeader = request.headers.get('Sec-WebSocket-Protocol') || '';
-    const { earlyData } = base64ToArrayBuffer(earlyDataHeader);
 
-    // Now we can safely wait for the first data chunk.
-    const firstChunk = earlyData || (await reader.read()).value;
+    // Create the stream atomically, passing the early data header to the utility.
+    const webSocketStream = makeReadableWebSocketStream(server, earlyDataHeader, logContext);
+    const reader = webSocketStream.getReader();
+
+    // Now this is safe. The stream will provide the first chunk from either
+    // early data or the first message, with no chance of loss.
+    const firstChunk = (await reader.read()).value;
+
     if (!firstChunk) {
       throw new Error('No data received from client after connection.');
     }
@@ -34,12 +37,12 @@ async function processVlessConnection(server, request, logContext) {
     }
 
     const { isUDP, address, port, rawData, vlessVersion } = headerInfo;
-    logContext.remoteAddress = address; // Update log context for better logging
+    logContext.remoteAddress = address;
     logContext.remotePort = port;
     const protocol = isUDP ? 'UDP' : 'TCP';
     logger.info(logContext, 'CONNECTION', `Processing ${protocol} request for ${address}:${port}`);
 
-    // Reconstitute the full stream (initial data + rest of the stream) for the actors.
+    // Reconstitute the full stream (initial data payload + rest of the stream).
     const consumableStream = createConsumableStream(reader, rawData);
 
     if (isUDP) {
