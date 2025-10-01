@@ -5,11 +5,64 @@
 
 import { connect } from 'cloudflare:sockets';
 import { logger } from '../lib/logger.js';
-import { safeCloseWebSocket, WS_READY_STATE } from '../lib/utils.js';
+import { safeCloseWebSocket } from '../lib/utils.js';
 import { config } from '../lib/config.js';
 
 /**
- * The main handler for TCP proxying. Implements the "retry on no data" logic in a race-free and robust way.
+ * Manually pumps data from a client's reader to a remote socket's writer.
+ * It returns a boolean indicating if any data was successfully pumped.
+ */
+async function pumpClientToRemote(reader, writer, logContext) {
+  let hasReceivedData = false;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        await writer.close();
+        break;
+      }
+
+      if (!hasReceivedData) {
+        hasReceivedData = true;
+      }
+
+      await writer.write(value);
+    }
+  } catch (error) {
+    logger.error(logContext, 'PUMP:CLIENT_REMOTE_ERROR', 'Error pumping from client to remote:', error);
+    await writer.abort(error);
+  }
+  return hasReceivedData;
+}
+
+/**
+ * Manually pumps data from a remote socket's reader to the client WebSocket.
+ * It returns a boolean indicating if any data was successfully pumped.
+ */
+async function pumpRemoteToClient(reader, webSocket, logContext) {
+  let hasReceivedData = false;
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        await reader.cancel();
+        break;
+      }
+
+      if (!hasReceivedData) {
+        hasReceivedData = true;
+      }
+
+      await webSocket.send(value);
+    }
+  } catch (error) {
+    logger.error(logContext, 'PUMP:REMOTE_CLIENT_ERROR', 'Error pumping from remote to client:', error);
+  }
+  return hasReceivedData;
+}
+
+/**
+ * The main handler for TCP proxying. Implements "retry on no data" symmetrically.
  * @param {WebSocket} webSocket - The client WebSocket.
  * @param {ReadableStream} consumableStream - The client data stream.
  * @param {string} address - Destination address.
@@ -19,104 +72,50 @@ import { config } from '../lib/config.js';
  */
 export async function handleTcpProxy(webSocket, consumableStream, address, port, vlessVersion, logContext) {
   const tcpLogContext = { ...logContext, section: 'TCP_PROXY' };
+  const clientReader = consumableStream.getReader();
 
-  let remoteSocket;
-  let hasReceivedData = false;
+  // This function attempts a connection and starts symmetric bidirectional pumps.
+  const attemptConnection = async (host, portNum) => {
+    logger.info(tcpLogContext, `TCP:CONNECT_ATTEMPT`, `Connecting to destination: ${host}:${portNum}`);
+    const remoteSocket = await connect({ hostname: host, port: portNum });
 
-  // A controller for the client-to-remote pipe.
-  // We won't start this pipe until we have a socket.
-  const clientWriterController = {
-    writer: null,
-    acquire(socket) {
-      this.writer = socket.writable.getWriter();
-    },
-    release() {
-      if (this.writer) {
-        this.writer.releaseLock();
-        this.writer = null;
-      }
-    },
-    async write(chunk) {
-      if (this.writer) {
-        await this.writer.write(chunk);
-      } else {
-        // This case should not happen with the new logic.
-        logger.warn(tcpLogContext, 'TCP:CLIENT_PIPE', 'No active writer, dropping chunk.');
-      }
-    },
+    const remoteReader = remoteSocket.readable.getReader();
+    const remoteWriter = remoteSocket.writable.getWriter();
+
+    const clientToRemoteJob = pumpClientToRemote(clientReader, remoteWriter, tcpLogContext);
+    const remoteToClientJob = pumpRemoteToClient(remoteReader, webSocket, tcpLogContext);
+
+    // Run both pumps concurrently and wait for their results.
+    const [clientToRemoteJobhasData, remoteToClientJobhasData] = await Promise.all([clientToRemoteJob, remoteToClientJob]);
+    return clientToRemoteJobhasData && remoteToClientJobhasData ? true : false;
   };
 
-  // Start the client->remote pump in the background. It will wait for a writer to be acquired.
-  const clientToRemoteJob = consumableStream
-    .pipeTo(
-      new WritableStream({
-        write: (chunk) => clientWriterController.write(chunk),
-        close: () => clientWriterController.release(),
-      })
-    )
-    .catch((error) => {
-      // Ignore errors here; they are handled by the main connection logic.
-    });
-
   try {
-    // --- Primary Connection Attempt ---
-    logger.info(tcpLogContext, 'TCP:PRIMARY_ATTEMPT', `Connecting to primary destination: ${address}:${port}`);
-    remoteSocket = await connect({ hostname: address, port });
-    clientWriterController.acquire(remoteSocket);
-
-    // Send the VLESS response header now that we have a live socket.
+    // Send the VLESS response header once before the first connection attempt.
     webSocket.send(new Uint8Array([vlessVersion[0], 0]));
 
-    // Start the remote->client pipe and monitor if data is received.
-    await remoteSocket.readable.pipeTo(
-      new WritableStream({
-        write(chunk) {
-          hasReceivedData = true;
-          if (webSocket.readyState === WS_READY_STATE.OPEN) webSocket.send(chunk);
-        },
-      })
-    );
+    // --- Primary Connection Attempt ---
+    const primaryDataReceived = await attemptConnection(address, port);
 
-    // If we reach here, the primary remote closed the connection.
-    // Check if we ever received data.
-    if (hasReceivedData) {
+    if (primaryDataReceived) {
       logger.info(tcpLogContext, 'TCP:PRIMARY_SUCCESS', 'Primary connection finished successfully.');
       return; // Success, we are done.
     }
 
     // --- Retry Logic ---
     logger.warn(tcpLogContext, 'TCP:RETRY_TRIGGER', 'Primary connection closed without receiving data. Retrying with relay...');
-    clientWriterController.release(); // Release the lock on the closed/failed socket.
 
     const [relayAddr, relayPortStr] = config.RELAY_ADDR.split(':');
     const relayPort = relayPortStr ? parseInt(relayPortStr, 10) : port;
     tcpLogContext.remoteAddress = relayAddr;
     tcpLogContext.remotePort = relayPort;
 
-    logger.info(tcpLogContext, 'TCP:RETRY_ATTEMPT', `Connecting to relay destination: ${relayAddr}:${relayPort}`);
-    remoteSocket = await connect({ hostname: relayAddr, port: relayPort });
-    clientWriterController.acquire(remoteSocket); // Acquire the new writer. The background pipe will now use this one.
-
-    // Start the remote->client pipe for the relay connection.
-    await remoteSocket.readable.pipeTo(
-      new WritableStream({
-        write(chunk) {
-          if (webSocket.readyState === WS_READY_STATE.OPEN) webSocket.send(chunk);
-        },
-      })
-    );
-
+    await attemptConnection(relayAddr, relayPort);
     logger.info(tcpLogContext, 'TCP:RETRY_COMPLETE', 'Relay connection process finished.');
   } catch (error) {
     logger.error(tcpLogContext, 'TCP:FATAL_ERROR', 'A connection attempt failed fatally:', error.stack || error);
   } finally {
     // Final cleanup.
     safeCloseWebSocket(webSocket, tcpLogContext);
-    clientWriterController.release();
-    if (remoteSocket) {
-      try {
-        await remoteSocket.close();
-      } catch (e) {}
-    }
   }
 }
