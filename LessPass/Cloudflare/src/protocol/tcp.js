@@ -32,8 +32,8 @@ export async function handleTcpProxy(webSocket, consumableStream, address, port,
 
     try {
       const [clientToRemote, remoteToClient] = [
-        pumpClientToRemote(clientReader, remoteWriter, tcpLogContext),
-        pumpRemoteToClient(remoteReader, webSocket, tcpLogContext),
+        pumpClientToRemote(clientReader, remoteWriter),
+        pumpRemoteToClient(remoteReader, webSocket),
       ];
 
       const [hasClientSentData, hasRemoteSentData] = await Promise.all([clientToRemote, remoteToClient]);
@@ -85,7 +85,7 @@ export async function handleTcpProxy(webSocket, consumableStream, address, port,
  * Pumps data from a client's ReadableStream to a remote socket's WritableStream.
  * @returns {Promise<boolean>} A boolean indicating if any data was pumped.
  */
-async function pumpClientToRemote(reader, writer, logContext) {
+async function pumpClientToRemote(reader, writer) {
   let hasPumpedData = false;
   try {
     while (true) {
@@ -100,7 +100,6 @@ async function pumpClientToRemote(reader, writer, logContext) {
   } catch (error) {
     // Abort the writer on error to signal failure to the remote.
     await writer.abort(error).catch(() => {});
-    throw error;
   }
   return hasPumpedData;
 }
@@ -109,7 +108,7 @@ async function pumpClientToRemote(reader, writer, logContext) {
  * Pumps data from a remote socket's ReadableStream to the client WebSocket.
  * @returns {Promise<boolean>} A boolean indicating if any data was pumped.
  */
-async function pumpRemoteToClient(reader, webSocket, logContext) {
+async function pumpRemoteToClient(reader, webSocket) {
   let hasPumpedData = false;
   try {
     while (true) {
@@ -124,7 +123,6 @@ async function pumpRemoteToClient(reader, webSocket, logContext) {
   } catch (error) {
     // Abort the reader on error to stop further reads.
     await reader.cancel(error).catch(() => {});
-    throw error;
   }
   return hasPumpedData;
 }
