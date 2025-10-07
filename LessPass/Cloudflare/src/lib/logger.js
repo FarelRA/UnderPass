@@ -5,12 +5,12 @@
 
 export const LOG_LEVELS = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, TRACE: 4 };
 
-let globalRequestContext = {};
+let globalLogContext = {};
 
 function formatLogMessage(level, message, context = {}, additionalInfo = '', ...optionalParams) {
   try {
     const timestamp = new Date().toISOString();
-    const mergedContext = { ...globalRequestContext, ...context };
+    const mergedContext = { ...globalLogContext, ...context };
     const { logId = 'N/A', section = 'N/A', clientIP = 'N/A', remoteAddress, remotePort } = mergedContext;
     const fullSection = additionalInfo ? `${section}:${additionalInfo}` : section;
     const remote = remoteAddress && remotePort ? `[Remote: ${remoteAddress}:${remotePort}] ` : '';
@@ -24,10 +24,10 @@ function formatLogMessage(level, message, context = {}, additionalInfo = '', ...
 export const logger = {
   logLevel: LOG_LEVELS.INFO,
   setLogContext(context) {
-    globalRequestContext = { ...context };
+    globalLogContext = { ...context };
   },
   updateLogContext(context) {
-    globalRequestContext = { ...globalRequestContext, ...context };
+    globalLogContext = { ...globalLogContext, ...context };
   },
   setLogLevel(level) {
     try {
