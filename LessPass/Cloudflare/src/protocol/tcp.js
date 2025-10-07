@@ -82,10 +82,7 @@ async function testConnection(host, port, initialPayload, logContext) {
       await remoteWriter.write(initialPayload);
     }
 
-    const firstResponse = await Promise.race([
-      remoteReader.read(),
-      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1000))
-    ]);
+    const firstResponse = await remoteReader.read();
 
     if (firstResponse.done) {
       return null;
