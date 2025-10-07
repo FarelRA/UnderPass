@@ -22,54 +22,16 @@ import { safeCloseWebSocket } from '../lib/utils.js';
 export async function handleTcpProxy(webSocket, initialPayload, wsStream, address, port, vlessVersion, config, logContext) {
   const tcpLogContext = { ...logContext, section: 'TCP_PROXY' };
 
-  const testConnection = async (host, portNum) => {
-    logger.info(tcpLogContext, 'TCP:TEST', `Testing connection to: ${host}:${portNum}`);
-    const remoteSocket = await connect({ hostname: host, port: portNum });
-    const remoteReader = remoteSocket.readable.getReader();
-    const remoteWriter = remoteSocket.writable.getWriter();
-
-    try {
-      if (initialPayload.byteLength > 0) {
-        await remoteWriter.write(initialPayload);
-      }
-
-      const firstResponse = await Promise.race([
-        remoteReader.read(),
-        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1000))
-      ]);
-
-      if (firstResponse.done) {
-        return null;
-      }
-
-      return { remoteSocket, remoteReader, remoteWriter, firstResponse: firstResponse.value };
-    } catch (error) {
-      remoteReader.releaseLock();
-      throw error;
-    }
-  };
-
-  const proxyConnection = async (remoteReader, remoteWriter, firstResponse) => {
-    webSocket.send(firstResponse);
-
-    const [clientToRemote, remoteToClient] = [
-      pumpWebSocketToRemote(wsStream, remoteWriter),
-      pumpRemoteToClient(remoteReader, webSocket),
-    ];
-
-    await Promise.all([clientToRemote, remoteToClient]);
-  };
-
   try {
     webSocket.send(new Uint8Array([vlessVersion[0], 0]));
 
     // --- Primary Connection Attempt ---
     let connection = null;
     try {
-      connection = await testConnection(address, port);
+      connection = await testConnection(address, port, initialPayload, tcpLogContext);
       if (connection) {
         logger.info(tcpLogContext, 'TCP:PRIMARY_SUCCESS', 'Primary connection established.');
-        await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse);
+        await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
       } else {
         logger.warn(tcpLogContext, 'TCP:PRIMARY_IDLE', 'Primary connection closed without data exchange.');
       }
@@ -87,10 +49,10 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
       const relayLogContext = { ...tcpLogContext, remoteAddress: relayAddr, remotePort: relayPort };
 
       try {
-        connection = await testConnection(relayAddr, relayPort);
+        connection = await testConnection(relayAddr, relayPort, initialPayload, relayLogContext);
         if (connection) {
           logger.info(relayLogContext, 'TCP:RETRY_SUCCESS', 'Relay connection established.');
-          await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse);
+          await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
         }
       } catch (error) {
         logger.error(relayLogContext, 'TCP:RETRY_FAIL', `Relay connection to ${relayAddr}:${relayPort} failed:`, error.message);
@@ -103,6 +65,51 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
   } finally {
     safeCloseWebSocket(webSocket, tcpLogContext);
   }
+}
+
+/**
+ * Tests a TCP connection by sending payload and waiting for first response.
+ * @returns {Promise<{remoteSocket, remoteReader, remoteWriter, firstResponse}|null>}
+ */
+async function testConnection(host, port, initialPayload, logContext) {
+  logger.info(logContext, 'TCP:TEST', `Testing connection to: ${host}:${port}`);
+  const remoteSocket = await connect({ hostname: host, port });
+  const remoteReader = remoteSocket.readable.getReader();
+  const remoteWriter = remoteSocket.writable.getWriter();
+
+  try {
+    if (initialPayload.byteLength > 0) {
+      await remoteWriter.write(initialPayload);
+    }
+
+    const firstResponse = await Promise.race([
+      remoteReader.read(),
+      new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1000))
+    ]);
+
+    if (firstResponse.done) {
+      return null;
+    }
+
+    return { remoteSocket, remoteReader, remoteWriter, firstResponse: firstResponse.value };
+  } catch (error) {
+    remoteReader.releaseLock();
+    throw error;
+  }
+}
+
+/**
+ * Proxies bidirectional data between WebSocket and remote socket.
+ */
+async function proxyConnection(remoteReader, remoteWriter, firstResponse, wsStream, webSocket) {
+  webSocket.send(firstResponse);
+
+  const [clientToRemote, remoteToClient] = [
+    pumpWebSocketToRemote(wsStream, remoteWriter),
+    pumpRemoteToClient(remoteReader, webSocket),
+  ];
+
+  await Promise.all([clientToRemote, remoteToClient]);
 }
 
 /**
