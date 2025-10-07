@@ -18,6 +18,7 @@ import { initializeWebSocketStream, stringifyUUID } from '../lib/utils.js';
  */
 export function handleVlessRequest(request, config, logContext) {
   const vlessLogContext = { ...logContext, section: 'VLESS' };
+  logger.trace(vlessLogContext, 'ENTRY', 'handleVlessRequest called');
 
   try {
     if (!request) {
@@ -30,11 +31,13 @@ export function handleVlessRequest(request, config, logContext) {
       return new Response('Internal Server Error', { status: 500 });
     }
 
+    logger.debug(vlessLogContext, 'WS_PAIR', 'Creating WebSocket pair');
     let client, server;
     try {
       const pair = new WebSocketPair();
       client = pair[0];
       server = pair[1];
+      logger.trace(vlessLogContext, 'WS_PAIR', 'WebSocket pair created successfully');
     } catch (wsError) {
       logger.error(vlessLogContext, 'WEBSOCKET_PAIR_ERROR', `Failed to create WebSocket pair: ${wsError.message}`);
       return new Response('WebSocket creation failed', { status: 500 });
@@ -42,11 +45,13 @@ export function handleVlessRequest(request, config, logContext) {
 
     try {
       server.accept();
+      logger.debug(vlessLogContext, 'WS_ACCEPT', 'WebSocket accepted');
     } catch (acceptError) {
       logger.error(vlessLogContext, 'WEBSOCKET_ACCEPT_ERROR', `Failed to accept WebSocket: ${acceptError.message}`);
       return new Response('WebSocket accept failed', { status: 500 });
     }
 
+    logger.info(vlessLogContext, 'PROCESSING', 'Starting VLESS connection processing');
     processVlessConnection(server, request, config, vlessLogContext).catch((err) => {
       logger.error(vlessLogContext, 'CONNECTION_SETUP_ERROR', `Failed to process VLESS connection: ${err.message}`);
       try {
@@ -56,6 +61,7 @@ export function handleVlessRequest(request, config, logContext) {
       }
     });
 
+    logger.debug(vlessLogContext, 'RESPONSE', 'Returning 101 Switching Protocols');
     return new Response(null, { status: 101, webSocket: client });
   } catch (error) {
     logger.error(vlessLogContext, 'VLESS_HANDLER_ERROR', `Unhandled error in handleVlessRequest: ${error.message}`);
@@ -71,31 +77,41 @@ export function handleVlessRequest(request, config, logContext) {
  * @param {object} logContext The logging context.
  */
 async function processVlessConnection(server, request, config, logContext) {
+  logger.trace(logContext, 'PROCESS', 'processVlessConnection started');
+
   if (!server) {
+    logger.error(logContext, 'NO_SERVER', 'WebSocket server is null/undefined');
     throw new Error('WebSocket server is null/undefined');
   }
 
   if (!request) {
+    logger.error(logContext, 'NO_REQUEST', 'Request is null/undefined');
     throw new Error('Request is null/undefined');
   }
 
   if (!config) {
+    logger.error(logContext, 'NO_CONFIG', 'Config is null/undefined');
     throw new Error('Config is null/undefined');
   }
 
+  logger.debug(logContext, 'STREAM_INIT', 'Initializing WebSocket stream');
   let firstChunk, wsStream;
   try {
     const result = await initializeWebSocketStream(server, request);
     firstChunk = result.firstChunk;
     wsStream = result.wsStream;
+    logger.debug(logContext, 'STREAM_READY', `Stream initialized, first chunk: ${firstChunk.byteLength} bytes`);
   } catch (streamError) {
+    logger.error(logContext, 'STREAM_ERROR', `Failed to initialize WebSocket stream: ${streamError.message}`);
     throw new Error(`Failed to initialize WebSocket stream: ${streamError.message}`);
   }
 
   if (!firstChunk || firstChunk.byteLength === 0) {
+    logger.error(logContext, 'EMPTY_CHUNK', 'First chunk is empty or invalid');
     throw new Error('First chunk is empty or invalid');
   }
 
+  logger.debug(logContext, 'HEADER_PARSE', 'Parsing VLESS header');
   let vlessVersion, userID, protocol, address, port, payload;
   try {
     const parsed = processVlessHeader(firstChunk);
@@ -105,20 +121,28 @@ async function processVlessConnection(server, request, config, logContext) {
     address = parsed.address;
     port = parsed.port;
     payload = parsed.payload;
+    logger.debug(logContext, 'HEADER_PARSED', `Protocol: ${protocol}, Address: ${address}:${port}, Payload: ${payload.byteLength} bytes`);
   } catch (headerError) {
+    logger.error(logContext, 'HEADER_ERROR', `Failed to process VLESS header: ${headerError.message}`);
     throw new Error(`Failed to process VLESS header: ${headerError.message}`);
   }
 
+  logger.trace(logContext, 'UUID_STRINGIFY', 'Converting user ID to string');
   let userIDString;
   try {
     userIDString = stringifyUUID(userID);
+    logger.trace(logContext, 'UUID_RESULT', `User ID: ${userIDString}`);
   } catch (uuidError) {
+    logger.error(logContext, 'UUID_ERROR', `Failed to stringify user ID: ${uuidError.message}`);
     throw new Error(`Failed to stringify user ID: ${uuidError.message}`);
   }
 
   if (userIDString !== config.USER_ID) {
+    logger.warn(logContext, 'AUTH_FAIL', `Invalid user ID. Expected: ${config.USER_ID}, Got: ${userIDString}`);
     throw new Error(`Invalid user ID. Expected: ${config.USER_ID}, Got: ${userIDString}`);
   }
+
+  logger.info(logContext, 'AUTH_SUCCESS', `User authenticated: ${userIDString}`);
 
   logContext.remoteAddress = address;
   logContext.remotePort = port;
@@ -127,13 +151,18 @@ async function processVlessConnection(server, request, config, logContext) {
   try {
     if (protocol === 'UDP') {
       if (port !== 53) {
+        logger.error(logContext, 'INVALID_UDP_PORT', `UDP is only supported for DNS on port 53, got port ${port}`);
         throw new Error(`UDP is only supported for DNS on port 53, got port ${port}`);
       }
+      logger.debug(logContext, 'UDP_PROXY', 'Dispatching to UDP proxy handler');
       await handleUdpProxy(server, payload, wsStream, vlessVersion, config, logContext);
     } else {
+      logger.debug(logContext, 'TCP_PROXY', 'Dispatching to TCP proxy handler');
       await handleTcpProxy(server, payload, wsStream, address, port, vlessVersion, config, logContext);
     }
+    logger.info(logContext, 'PROXY_COMPLETE', `${protocol} proxy completed successfully`);
   } catch (proxyError) {
+    logger.error(logContext, 'PROXY_ERROR', `Proxy handler failed: ${proxyError.message}`);
     throw new Error(`Proxy handler failed: ${proxyError.message}`);
   }
 }
