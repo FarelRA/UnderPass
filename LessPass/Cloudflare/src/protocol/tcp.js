@@ -262,7 +262,7 @@ async function pumpWebSocketToRemote(wsStream, writer) {
     try {
       reader.releaseLock();
     } catch (lockError) {
-      logger.warn({}, 'TCP:LOCK', `Failed to release lock: ${lockError.message}`);
+      logger.warn('TCP:LOCK', `Failed to release lock: ${lockError.message}`);
     }
   }
 }
