@@ -286,7 +286,7 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
  * Tests a TCP connection by sending payload and waiting for first response.
  * @returns {Promise<{remoteSocket, remoteReader, remoteWriter, firstResponse}|null>}
  */
-async function testConnection(host, port, initialPayload, logContext) {
+async function testConnection(host, port, initialPayload) {
   if (!host || typeof host !== 'string') {
     throw new Error('host must be a non-empty string');
   }
@@ -297,7 +297,7 @@ async function testConnection(host, port, initialPayload, logContext) {
     throw new Error('initialPayload must be a Uint8Array');
   }
 
-  logger.info(logContext, 'TCP:TEST', `Testing connection to: ${host}:${port}`);
+  logger.info('TCP:TEST', `Testing connection to: ${host}:${port}`);
   
   let remoteSocket, remoteReader, remoteWriter;
   try {
@@ -329,7 +329,7 @@ async function testConnection(host, port, initialPayload, logContext) {
     try {
       remoteReader.releaseLock();
     } catch (lockError) {
-      logger.warn(logContext, 'TCP:LOCK_ERROR', `Failed to release lock: ${lockError.message}`);
+      logger.warn('TCP:LOCK_ERROR', `Failed to release lock: ${lockError.message}`);
     }
     throw error;
   }

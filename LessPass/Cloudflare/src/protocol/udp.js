@@ -16,8 +16,8 @@ import { safeCloseWebSocket } from '../lib/utils.js';
  * @param {object} config The request-scoped configuration.
  * @param {object} logContext Logging context.
  */
-export async function handleUdpProxy(webSocket, initialPayload, wsStream, vlessVersion, config, logContext) {
-  const udpLogContext = { ...logContext, section: 'UDP_PROXY' };
+export async function handleUdpProxy(webSocket, initialPayload, wsStream, vlessVersion, config) {
+  
 
   if (!webSocket) {
     throw new Error('WebSocket is required');
@@ -60,7 +60,7 @@ export async function handleUdpProxy(webSocket, initialPayload, wsStream, vlessV
  * @param {object} config The request-scoped configuration.
  * @param {object} logContext Logging context.
  */
-async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, logContext) {
+async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config) {
   const processChunk = async (chunk) => {
     if (!chunk || !(chunk instanceof Uint8Array)) {
       const error = new Error('Received invalid chunk data');
@@ -163,7 +163,7 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, logC
  * @param {object} config The request-scoped configuration.
  * @param {object} logContext Logging context.
  */
-async function processDnsPacket(dnsQuery, webSocket, config, logContext) {
+async function processDnsPacket(dnsQuery, webSocket, config) {
   if (!dnsQuery || !(dnsQuery instanceof Uint8Array)) {
     const error = new Error('DNS query must be a Uint8Array');
     logger.error('UDP:INVALID_QUERY', error.message);

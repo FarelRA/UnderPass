@@ -205,34 +205,34 @@ export function base64ToUint8Array(base64Str) {
  * @param {WebSocket} socket The WebSocket to close.
  * @param {object} logContext Logging context.
  */
-export function safeCloseWebSocket(socket, logContext) {
-  logger.trace(logContext, 'safeCloseWebSocket', 'Attempting to close WebSocket');
+export function safeCloseWebSocket(socket) {
+  logger.trace('safeCloseWebSocket', 'Attempting to close WebSocket');
 
   if (!socket) {
-    logger.warn(logContext, 'safeCloseWebSocket', 'Socket is null/undefined');
+    logger.warn('safeCloseWebSocket', 'Socket is null/undefined');
     return;
   }
 
   try {
     if (typeof socket.readyState === 'undefined') {
-      logger.warn(logContext, 'safeCloseWebSocket', 'Socket has no readyState property');
+      logger.warn('safeCloseWebSocket', 'Socket has no readyState property');
       return;
     }
 
-    logger.debug(logContext, 'safeCloseWebSocket', `WebSocket readyState: ${socket.readyState}`);
+    logger.debug('safeCloseWebSocket', `WebSocket readyState: ${socket.readyState}`);
 
     if (socket.readyState < WS_READY_STATE.CLOSING) {
       try {
         socket.close();
-        logger.debug(logContext, 'safeCloseWebSocket', 'WebSocket closed successfully');
+        logger.debug('safeCloseWebSocket', 'WebSocket closed successfully');
       } catch (closeError) {
-        logger.error(logContext, 'safeCloseWebSocket', `Failed to close WebSocket: ${closeError.message}`);
+        logger.error('safeCloseWebSocket', `Failed to close WebSocket: ${closeError.message}`);
       }
     } else {
-      logger.trace(logContext, 'safeCloseWebSocket', 'WebSocket already closing or closed');
+      logger.trace('safeCloseWebSocket', 'WebSocket already closing or closed');
     }
   } catch (error) {
-    logger.error(logContext, 'safeCloseWebSocket', `Error in safeCloseWebSocket: ${error.message}`);
+    logger.error('safeCloseWebSocket', `Error in safeCloseWebSocket: ${error.message}`);
   }
 }
 
