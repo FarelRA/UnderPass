@@ -18,71 +18,73 @@ export default {
   async fetch(request, env) {
     const logId = generateLogId();
     const clientIP = request.headers.get('CF-Connecting-IP') || 'N/A';
-    const logContext = { logId, clientIP };
-
-    logger.trace({ ...logContext, section: 'WORKER' }, 'ENTRY', 'Worker fetch handler invoked');
+    
+    logger.setRequestContext(logId, clientIP);
+    logger.trace({ section: 'WORKER' }, 'ENTRY', 'Worker fetch handler invoked');
 
     try {
       if (!request || !request.url) {
-        logger.error({ ...logContext, section: 'WORKER' }, 'INVALID_REQUEST', 'Request or request.url is null/undefined');
+        logger.error({ section: 'WORKER' }, 'INVALID_REQUEST', 'Request or request.url is null/undefined');
         return new Response('Bad Request', { status: 400 });
       }
 
-      logger.debug({ ...logContext, section: 'WORKER' }, 'REQUEST_VALID', `Request URL: ${request.url}, Method: ${request.method}`);
+      logger.debug({ section: 'WORKER' }, 'REQUEST_VALID', `Request URL: ${request.url}, Method: ${request.method}`);
 
       let url;
       try {
         url = new URL(request.url);
-        logger.trace({ ...logContext, section: 'WORKER' }, 'URL_PARSED', `Parsed URL - Host: ${url.host}, Path: ${url.pathname}`);
+        logger.trace({ section: 'WORKER' }, 'URL_PARSED', `Parsed URL - Host: ${url.host}, Path: ${url.pathname}`);
       } catch (urlError) {
-        logger.error({ ...logContext, section: 'WORKER' }, 'URL_PARSE_ERROR', `Failed to parse URL: ${urlError.message}`);
+        logger.error({ section: 'WORKER' }, 'URL_PARSE_ERROR', `Failed to parse URL: ${urlError.message}`);
         return new Response('Bad Request: Invalid URL', { status: 400 });
       }
 
       let config;
       try {
-        logger.debug({ ...logContext, section: 'WORKER' }, 'CONFIG_INIT', 'Initializing configuration');
+        logger.debug({ section: 'WORKER' }, 'CONFIG_INIT', 'Initializing configuration');
         config = initializeConfig(url, env);
-        logger.trace({ ...logContext, section: 'WORKER' }, 'CONFIG_LOADED', `Config: LOG_LEVEL=${config.LOG_LEVEL}, RELAY_ADDR=${config.RELAY_ADDR}`);
+        logger.trace({ section: 'WORKER' }, 'CONFIG_LOADED', `Config: LOG_LEVEL=${config.LOG_LEVEL}, RELAY_ADDR=${config.RELAY_ADDR}`);
       } catch (configError) {
-        logger.error({ ...logContext, section: 'WORKER' }, 'CONFIG_ERROR', `Failed to initialize config: ${configError.message}`);
+        logger.error({ section: 'WORKER' }, 'CONFIG_ERROR', `Failed to initialize config: ${configError.message}`);
         return new Response('Internal Server Error: Configuration failed', { status: 500 });
       }
 
       try {
         logger.setLogLevel(config.LOG_LEVEL);
-        logger.debug({ ...logContext, section: 'WORKER' }, 'LOG_LEVEL_SET', `Log level set to: ${config.LOG_LEVEL}`);
+        logger.debug({ section: 'WORKER' }, 'LOG_LEVEL_SET', `Log level set to: ${config.LOG_LEVEL}`);
       } catch (logError) {
-        logger.error({ ...logContext, section: 'WORKER' }, 'LOG_LEVEL_ERROR', `Failed to set log level: ${logError.message}`);
+        logger.error({ section: 'WORKER' }, 'LOG_LEVEL_ERROR', `Failed to set log level: ${logError.message}`);
       }
 
       const upgradeHeader = request.headers.get('Upgrade');
-      logger.trace({ ...logContext, section: 'WORKER' }, 'UPGRADE_HEADER', `Upgrade header: ${upgradeHeader}`);
+      logger.trace({ section: 'WORKER' }, 'UPGRADE_HEADER', `Upgrade header: ${upgradeHeader}`);
 
       if (upgradeHeader === 'websocket') {
-        logger.info({ ...logContext, section: 'WORKER' }, 'ROUTING', 'Handling WebSocket (VLESS) request.');
+        logger.info({ section: 'WORKER' }, 'ROUTING', 'Handling WebSocket (VLESS) request.');
         try {
-          const response = handleVlessRequest(request, config, logContext);
-          logger.debug({ ...logContext, section: 'WORKER' }, 'VLESS_SUCCESS', 'VLESS handler returned successfully');
+          const response = handleVlessRequest(request, config);
+          logger.debug({ section: 'WORKER' }, 'VLESS_SUCCESS', 'VLESS handler returned successfully');
           return response;
         } catch (vlessError) {
-          logger.error({ ...logContext, section: 'WORKER' }, 'VLESS_HANDLER_ERROR', `VLESS handler failed: ${vlessError.message}`);
+          logger.error({ section: 'WORKER' }, 'VLESS_HANDLER_ERROR', `VLESS handler failed: ${vlessError.message}`);
           return new Response('WebSocket Upgrade Failed', { status: 500 });
         }
       } else {
-        logger.info({ ...logContext, section: 'WORKER' }, 'ROUTING', 'Handling standard HTTP request.');
+        logger.info({ section: 'WORKER' }, 'ROUTING', 'Handling standard HTTP request.');
         try {
-          const response = handleHttpRequest(request, env, config, logContext);
-          logger.debug({ ...logContext, section: 'WORKER' }, 'HTTP_SUCCESS', 'HTTP handler returned successfully');
+          const response = handleHttpRequest(request, env, config);
+          logger.debug({ section: 'WORKER' }, 'HTTP_SUCCESS', 'HTTP handler returned successfully');
           return response;
         } catch (httpError) {
-          logger.error({ ...logContext, section: 'WORKER' }, 'HTTP_HANDLER_ERROR', `HTTP handler failed: ${httpError.message}`);
+          logger.error({ section: 'WORKER' }, 'HTTP_HANDLER_ERROR', `HTTP handler failed: ${httpError.message}`);
           return new Response('Internal Server Error', { status: 500 });
         }
       }
     } catch (err) {
-      logger.error({ ...logContext, section: 'WORKER' }, 'FATAL', `Unhandled top-level error: ${err.message}`, err.stack);
+      logger.error({ section: 'WORKER' }, 'FATAL', `Unhandled top-level error: ${err.message}`, err.stack);
       return new Response('Internal Server Error', { status: 500 });
+    } finally {
+      logger.clearRequestContext();
     }
   },
 };
