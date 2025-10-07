@@ -22,8 +22,40 @@ import { safeCloseWebSocket } from '../lib/utils.js';
 export async function handleTcpProxy(webSocket, initialPayload, wsStream, address, port, vlessVersion, config, logContext) {
   const tcpLogContext = { ...logContext, section: 'TCP_PROXY' };
 
+  if (!webSocket) {
+    throw new Error('WebSocket is required');
+  }
+
+  if (!initialPayload || !(initialPayload instanceof Uint8Array)) {
+    throw new Error('initialPayload must be a Uint8Array');
+  }
+
+  if (!wsStream) {
+    throw new Error('wsStream is required');
+  }
+
+  if (!address || typeof address !== 'string') {
+    throw new Error('address must be a non-empty string');
+  }
+
+  if (typeof port !== 'number' || port < 1 || port > 65535) {
+    throw new Error(`port must be a number between 1-65535, got ${port}`);
+  }
+
+  if (!vlessVersion || !(vlessVersion instanceof Uint8Array)) {
+    throw new Error('vlessVersion must be a Uint8Array');
+  }
+
+  if (!config) {
+    throw new Error('config is required');
+  }
+
   try {
-    webSocket.send(new Uint8Array([vlessVersion[0], 0]));
+    try {
+      webSocket.send(new Uint8Array([vlessVersion[0], 0]));
+    } catch (sendError) {
+      throw new Error(`Failed to send VLESS handshake: ${sendError.message}`);
+    }
 
     // --- Primary Connection Attempt ---
     let connection = null;
@@ -31,40 +63,91 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
       connection = await testConnection(address, port, initialPayload, tcpLogContext);
       if (connection) {
         logger.info(tcpLogContext, 'TCP:PRIMARY_SUCCESS', 'Primary connection established.');
-        await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
+        try {
+          await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
+        } catch (proxyError) {
+          logger.error(tcpLogContext, 'TCP:PROXY_ERROR', `Proxy failed: ${proxyError.message}`);
+        }
       } else {
         logger.warn(tcpLogContext, 'TCP:PRIMARY_IDLE', 'Primary connection closed without data exchange.');
       }
     } catch (error) {
-      logger.error(tcpLogContext, 'TCP:PRIMARY_FAIL', `Primary connection to ${address}:${port} failed:`, error.message);
+      logger.error(tcpLogContext, 'TCP:PRIMARY_FAIL', `Primary connection to ${address}:${port} failed: ${error.message}`);
     } finally {
-      if (connection) connection.remoteReader.releaseLock();
+      if (connection && connection.remoteReader) {
+        try {
+          connection.remoteReader.releaseLock();
+        } catch (lockError) {
+          logger.warn(tcpLogContext, 'TCP:LOCK_RELEASE_ERROR', `Failed to release reader lock: ${lockError.message}`);
+        }
+      }
     }
 
     // --- Retry Logic ---
     if (!connection) {
       logger.info(tcpLogContext, 'TCP:RETRY_TRIGGER', 'Attempting connection to relay address.');
+      
+      if (!config.RELAY_ADDR) {
+        logger.error(tcpLogContext, 'TCP:NO_RELAY', 'No relay address configured');
+        try {
+          webSocket.close(1011, 'Connection failed: No relay');
+        } catch (closeError) {
+          logger.error(tcpLogContext, 'TCP:CLOSE_ERROR', `Failed to close WebSocket: ${closeError.message}`);
+        }
+        return;
+      }
+
       const [relayAddr, relayPortStr] = config.RELAY_ADDR.split(':');
       const relayPort = relayPortStr ? parseInt(relayPortStr, 10) : port;
+      
+      if (!relayAddr) {
+        logger.error(tcpLogContext, 'TCP:INVALID_RELAY', 'Invalid relay address format');
+        try {
+          webSocket.close(1011, 'Connection failed: Invalid relay');
+        } catch (closeError) {
+          logger.error(tcpLogContext, 'TCP:CLOSE_ERROR', `Failed to close WebSocket: ${closeError.message}`);
+        }
+        return;
+      }
+
       const relayLogContext = { ...tcpLogContext, remoteAddress: relayAddr, remotePort: relayPort };
 
       try {
         connection = await testConnection(relayAddr, relayPort, initialPayload, relayLogContext);
         if (connection) {
           logger.info(relayLogContext, 'TCP:RETRY_SUCCESS', 'Relay connection established.');
-          await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
+          try {
+            await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
+          } catch (proxyError) {
+            logger.error(relayLogContext, 'TCP:PROXY_ERROR', `Relay proxy failed: ${proxyError.message}`);
+          }
         } else {
           logger.error(tcpLogContext, 'TCP:ALL_FAILED', 'Both primary and relay connections failed.');
-          webSocket.close(1011, 'Connection failed');
+          try {
+            webSocket.close(1011, 'Connection failed');
+          } catch (closeError) {
+            logger.error(tcpLogContext, 'TCP:CLOSE_ERROR', `Failed to close WebSocket: ${closeError.message}`);
+          }
         }
       } catch (error) {
-        logger.error(relayLogContext, 'TCP:RETRY_FAIL', `Relay connection to ${relayAddr}:${relayPort} failed:`, error.message);
+        logger.error(relayLogContext, 'TCP:RETRY_FAIL', `Relay connection to ${relayAddr}:${relayPort} failed: ${error.message}`);
+        try {
+          webSocket.close(1011, 'Connection failed');
+        } catch (closeError) {
+          logger.error(tcpLogContext, 'TCP:CLOSE_ERROR', `Failed to close WebSocket: ${closeError.message}`);
+        }
       } finally {
-        if (connection) connection.remoteReader.releaseLock();
+        if (connection && connection.remoteReader) {
+          try {
+            connection.remoteReader.releaseLock();
+          } catch (lockError) {
+            logger.warn(relayLogContext, 'TCP:LOCK_RELEASE_ERROR', `Failed to release reader lock: ${lockError.message}`);
+          }
+        }
       }
     }
   } catch (err) {
-    logger.error(tcpLogContext, 'TCP:FATAL_ERROR', 'An unexpected error occurred in the TCP handler:', err.message);
+    logger.error(tcpLogContext, 'TCP:FATAL_ERROR', `An unexpected error occurred in the TCP handler: ${err.message}`);
   } finally {
     safeCloseWebSocket(webSocket, tcpLogContext);
   }
@@ -75,10 +158,29 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
  * @returns {Promise<{remoteSocket, remoteReader, remoteWriter, firstResponse}|null>}
  */
 async function testConnection(host, port, initialPayload, logContext) {
+  if (!host || typeof host !== 'string') {
+    throw new Error('host must be a non-empty string');
+  }
+  if (typeof port !== 'number' || port < 1 || port > 65535) {
+    throw new Error(`port must be between 1-65535, got ${port}`);
+  }
+  if (!initialPayload || !(initialPayload instanceof Uint8Array)) {
+    throw new Error('initialPayload must be a Uint8Array');
+  }
+
   logger.info(logContext, 'TCP:TEST', `Testing connection to: ${host}:${port}`);
-  const remoteSocket = await connect({ hostname: host, port });
-  const remoteReader = remoteSocket.readable.getReader();
-  const remoteWriter = remoteSocket.writable.getWriter();
+  
+  let remoteSocket, remoteReader, remoteWriter;
+  try {
+    remoteSocket = await connect({ hostname: host, port });
+    if (!remoteSocket || !remoteSocket.readable || !remoteSocket.writable) {
+      throw new Error('Invalid remote socket');
+    }
+    remoteReader = remoteSocket.readable.getReader();
+    remoteWriter = remoteSocket.writable.getWriter();
+  } catch (connectError) {
+    throw new Error(`Failed to connect: ${connectError.message}`);
+  }
 
   try {
     if (initialPayload.byteLength > 0) {
@@ -86,13 +188,20 @@ async function testConnection(host, port, initialPayload, logContext) {
     }
 
     const firstResponse = await remoteReader.read();
-    if (firstResponse.done) {
+    if (!firstResponse || firstResponse.done) {
       return null;
+    }
+    if (!firstResponse.value || !(firstResponse.value instanceof Uint8Array)) {
+      throw new Error('Invalid response data');
     }
 
     return { remoteSocket, remoteReader, remoteWriter, firstResponse: firstResponse.value };
   } catch (error) {
-    remoteReader.releaseLock();
+    try {
+      remoteReader.releaseLock();
+    } catch (lockError) {
+      logger.warn(logContext, 'TCP:LOCK_ERROR', `Failed to release lock: ${lockError.message}`);
+    }
     throw error;
   }
 }
@@ -101,7 +210,18 @@ async function testConnection(host, port, initialPayload, logContext) {
  * Proxies bidirectional data between WebSocket and remote socket.
  */
 async function proxyConnection(remoteReader, remoteWriter, firstResponse, wsStream, webSocket) {
-  webSocket.send(firstResponse);
+  if (!remoteReader || !remoteWriter || !firstResponse || !wsStream || !webSocket) {
+    throw new Error('All parameters are required for proxyConnection');
+  }
+  if (!(firstResponse instanceof Uint8Array)) {
+    throw new Error('firstResponse must be a Uint8Array');
+  }
+
+  try {
+    webSocket.send(firstResponse);
+  } catch (sendError) {
+    throw new Error(`Failed to send first response: ${sendError.message}`);
+  }
 
   const [clientToRemote, remoteToClient] = [
     pumpWebSocketToRemote(wsStream, remoteWriter),
@@ -115,18 +235,35 @@ async function proxyConnection(remoteReader, remoteWriter, firstResponse, wsStre
  * Pumps data from WebSocket stream to remote socket.
  */
 async function pumpWebSocketToRemote(wsStream, writer) {
-  const reader = wsStream.getReader();
+  if (!wsStream || !writer) {
+    throw new Error('wsStream and writer are required');
+  }
+
+  let reader;
+  try {
+    reader = wsStream.getReader();
+  } catch (readerError) {
+    throw new Error(`Failed to get reader: ${readerError.message}`);
+  }
+
   try {
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      await writer.write(value);
+      if (value && value instanceof Uint8Array) {
+        await writer.write(value);
+      }
     }
     await writer.close();
   } catch (error) {
     await writer.abort(error).catch(() => {});
+    throw error;
   } finally {
-    reader.releaseLock();
+    try {
+      reader.releaseLock();
+    } catch (lockError) {
+      logger.warn({}, 'TCP:LOCK', `Failed to release lock: ${lockError.message}`);
+    }
   }
 }
 
@@ -134,13 +271,20 @@ async function pumpWebSocketToRemote(wsStream, writer) {
  * Pumps data from remote socket to client WebSocket.
  */
 async function pumpRemoteToClient(reader, webSocket) {
+  if (!reader || !webSocket) {
+    throw new Error('reader and webSocket are required');
+  }
+
   try {
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      webSocket.send(value);
+      if (value && value instanceof Uint8Array) {
+        webSocket.send(value);
+      }
     }
   } catch (error) {
     await reader.cancel(error).catch(() => {});
+    throw error;
   }
 }
