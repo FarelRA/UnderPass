@@ -21,17 +21,15 @@ import { safeCloseWebSocket } from '../lib/utils.js';
  */
 export async function handleTcpProxy(webSocket, initialPayload, wsStream, address, port, vlessVersion, config, logContext) {
   const tcpLogContext = { ...logContext, section: 'TCP_PROXY' };
-  let primaryConnectionSuccessful = false;
 
-  const attemptConnection = async (host, portNum, sendPayload) => {
-    logger.info(tcpLogContext, 'TCP:ATTEMPT', `Connecting to: ${host}:${portNum}`);
+  const testConnection = async (host, portNum) => {
+    logger.info(tcpLogContext, 'TCP:TEST', `Testing connection to: ${host}:${portNum}`);
     const remoteSocket = await connect({ hostname: host, port: portNum });
-
     const remoteReader = remoteSocket.readable.getReader();
     const remoteWriter = remoteSocket.writable.getWriter();
 
     try {
-      if (sendPayload && initialPayload.byteLength > 0) {
+      if (initialPayload.byteLength > 0) {
         await remoteWriter.write(initialPayload);
       }
 
@@ -41,50 +39,63 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
       ]);
 
       if (firstResponse.done) {
-        return false;
+        return null;
       }
 
-      webSocket.send(firstResponse.value);
-
-      const [clientToRemote, remoteToClient] = [
-        pumpWebSocketToRemote(wsStream, remoteWriter),
-        pumpRemoteToClient(remoteReader, webSocket),
-      ];
-
-      await Promise.all([clientToRemote, remoteToClient]);
-      return true;
-    } finally {
+      return { remoteSocket, remoteReader, remoteWriter, firstResponse: firstResponse.value };
+    } catch (error) {
       remoteReader.releaseLock();
+      throw error;
     }
+  };
+
+  const proxyConnection = async (remoteReader, remoteWriter, firstResponse) => {
+    webSocket.send(firstResponse);
+
+    const [clientToRemote, remoteToClient] = [
+      pumpWebSocketToRemote(wsStream, remoteWriter),
+      pumpRemoteToClient(remoteReader, webSocket),
+    ];
+
+    await Promise.all([clientToRemote, remoteToClient]);
   };
 
   try {
     webSocket.send(new Uint8Array([vlessVersion[0], 0]));
 
     // --- Primary Connection Attempt ---
+    let connection = null;
     try {
-      primaryConnectionSuccessful = await attemptConnection(address, port, true);
-      if (primaryConnectionSuccessful) {
-        logger.info(tcpLogContext, 'TCP:PRIMARY_SUCCESS', 'Primary connection finished with data exchange.');
+      connection = await testConnection(address, port);
+      if (connection) {
+        logger.info(tcpLogContext, 'TCP:PRIMARY_SUCCESS', 'Primary connection established.');
+        await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse);
       } else {
         logger.warn(tcpLogContext, 'TCP:PRIMARY_IDLE', 'Primary connection closed without data exchange.');
       }
     } catch (error) {
       logger.error(tcpLogContext, 'TCP:PRIMARY_FAIL', `Primary connection to ${address}:${port} failed:`, error.message);
+    } finally {
+      if (connection) connection.remoteReader.releaseLock();
     }
 
     // --- Retry Logic ---
-    if (!primaryConnectionSuccessful) {
+    if (!connection) {
       logger.info(tcpLogContext, 'TCP:RETRY_TRIGGER', 'Attempting connection to relay address.');
       const [relayAddr, relayPortStr] = config.RELAY_ADDR.split(':');
       const relayPort = relayPortStr ? parseInt(relayPortStr, 10) : port;
       const relayLogContext = { ...tcpLogContext, remoteAddress: relayAddr, remotePort: relayPort };
 
       try {
-        await attemptConnection(relayAddr, relayPort, true);
-        logger.info(relayLogContext, 'TCP:RETRY_SUCCESS', 'Relay connection process finished.');
+        connection = await testConnection(relayAddr, relayPort);
+        if (connection) {
+          logger.info(relayLogContext, 'TCP:RETRY_SUCCESS', 'Relay connection established.');
+          await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse);
+        }
       } catch (error) {
         logger.error(relayLogContext, 'TCP:RETRY_FAIL', `Relay connection to ${relayAddr}:${relayPort} failed:`, error.message);
+      } finally {
+        if (connection) connection.remoteReader.releaseLock();
       }
     }
   } catch (err) {
