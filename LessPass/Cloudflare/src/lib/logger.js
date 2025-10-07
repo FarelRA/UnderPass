@@ -23,15 +23,11 @@ function formatLogMessage(level, message, context = {}, additionalInfo = '', ...
 
 export const logger = {
   logLevel: LOG_LEVELS.INFO,
-  setRequestContext(logId, clientIP) {
-    globalRequestContext = { logId, clientIP };
+  setLogContext(context) {
+    globalRequestContext = { ...context };
   },
-  updateRemoteAddress(remoteAddress, remotePort) {
-    globalRequestContext.remoteAddress = remoteAddress;
-    globalRequestContext.remotePort = remotePort;
-  },
-  clearRequestContext() {
-    globalRequestContext = {};
+  updateLogContext(context) {
+    globalRequestContext = { ...globalRequestContext, ...context };
   },
   setLogLevel(level) {
     try {
