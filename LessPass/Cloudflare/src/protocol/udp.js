@@ -44,7 +44,7 @@ export async function handleUdpProxy(webSocket, initialPayload, wsStream, vlessV
 
     await proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, udpLogContext);
   } catch (error) {
-    logger.error(udpLogContext, 'UDP:FATAL_ERROR', `An unrecoverable error occurred in the UDP handler: ${error.message}`);
+    logger.error('UDP:FATAL_ERROR', `An unrecoverable error occurred in the UDP handler: ${error.message}`);
   } finally {
     safeCloseWebSocket(webSocket, udpLogContext);
   }
@@ -64,7 +64,7 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, logC
   const processChunk = async (chunk) => {
     if (!chunk || !(chunk instanceof Uint8Array)) {
       const error = new Error('Received invalid chunk data');
-      logger.warn(logContext, 'UDP:INVALID_CHUNK', error.message);
+      logger.warn('UDP:INVALID_CHUNK', error.message);
       throw error;
     }
 
@@ -72,13 +72,13 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, logC
     try {
       view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
     } catch (viewError) {
-      logger.error(logContext, 'UDP:VIEW_ERROR', `Failed to create DataView: ${viewError.message}`);
+      logger.error('UDP:VIEW_ERROR', `Failed to create DataView: ${viewError.message}`);
       throw new Error(`Failed to create DataView: ${viewError.message}`);
     }
 
     for (let offset = 0; offset < chunk.byteLength; ) {
       if (offset + 2 > chunk.byteLength) {
-        logger.warn(logContext, 'UDP:PARSE', 'Incomplete length header in VLESS UDP chunk.');
+        logger.warn('UDP:PARSE', 'Incomplete length header in VLESS UDP chunk.');
         break;
       }
 
@@ -86,20 +86,20 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, logC
       try {
         length = view.getUint16(offset);
       } catch (lengthError) {
-        logger.error(logContext, 'UDP:LENGTH_ERROR', `Failed to read length: ${lengthError.message}`);
+        logger.error('UDP:LENGTH_ERROR', `Failed to read length: ${lengthError.message}`);
         break;
       }
 
       offset += 2;
       if (offset + length > chunk.byteLength) {
-        logger.warn(logContext, 'UDP:PARSE', 'Incomplete VLESS UDP packet payload.');
+        logger.warn('UDP:PARSE', 'Incomplete VLESS UDP packet payload.');
         break;
       }
 
       try {
         await processDnsPacket(chunk.slice(offset, offset + length), webSocket, config, logContext);
       } catch (packetError) {
-        logger.error(logContext, 'UDP:PACKET_PROCESS_ERROR', `Failed to process packet: ${packetError.message}`);
+        logger.error('UDP:PACKET_PROCESS_ERROR', `Failed to process packet: ${packetError.message}`);
       }
 
       offset += length;
@@ -110,7 +110,7 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, logC
     try {
       await processChunk(initialPayload);
     } catch (chunkError) {
-      logger.error(logContext, 'UDP:INITIAL_CHUNK_ERROR', `Failed to process initial payload: ${chunkError.message}`);
+      logger.error('UDP:INITIAL_CHUNK_ERROR', `Failed to process initial payload: ${chunkError.message}`);
     }
   }
 
@@ -127,29 +127,29 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, logC
       try {
         result = await reader.read();
       } catch (readError) {
-        logger.error(logContext, 'UDP:READ_ERROR', `Failed to read from stream: ${readError.message}`);
+        logger.error('UDP:READ_ERROR', `Failed to read from stream: ${readError.message}`);
         break;
       }
 
       const { value, done } = result;
       if (done) {
-        logger.info(logContext, 'UDP:CLOSE', 'Client UDP stream closed.');
+        logger.info('UDP:CLOSE', 'Client UDP stream closed.');
         break;
       }
 
       try {
         await processChunk(value);
       } catch (chunkError) {
-        logger.error(logContext, 'UDP:CHUNK_ERROR', `Failed to process chunk: ${chunkError.message}`);
+        logger.error('UDP:CHUNK_ERROR', `Failed to process chunk: ${chunkError.message}`);
       }
     }
   } catch (error) {
-    logger.warn(logContext, 'UDP:ABORT', `Client UDP stream aborted: ${error.message}`);
+    logger.warn('UDP:ABORT', `Client UDP stream aborted: ${error.message}`);
   } finally {
     try {
       reader.releaseLock();
     } catch (lockError) {
-      logger.warn(logContext, 'UDP:LOCK_ERROR', `Failed to release lock: ${lockError.message}`);
+      logger.warn('UDP:LOCK_ERROR', `Failed to release lock: ${lockError.message}`);
     }
   }
 }
@@ -166,19 +166,19 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, logC
 async function processDnsPacket(dnsQuery, webSocket, config, logContext) {
   if (!dnsQuery || !(dnsQuery instanceof Uint8Array)) {
     const error = new Error('DNS query must be a Uint8Array');
-    logger.error(logContext, 'UDP:INVALID_QUERY', error.message);
+    logger.error('UDP:INVALID_QUERY', error.message);
     throw error;
   }
 
   if (!webSocket) {
     const error = new Error('WebSocket is null/undefined');
-    logger.error(logContext, 'UDP:NO_WEBSOCKET', error.message);
+    logger.error('UDP:NO_WEBSOCKET', error.message);
     throw error;
   }
 
   if (!config || !config.DOH_URL) {
     const error = new Error('DOH_URL is not configured');
-    logger.error(logContext, 'UDP:NO_DOH_URL', error.message);
+    logger.error('UDP:NO_DOH_URL', error.message);
     throw error;
   }
 
@@ -203,7 +203,7 @@ async function processDnsPacket(dnsQuery, webSocket, config, logContext) {
       try {
         errorText = await response.text();
       } catch (textError) {
-        logger.warn(logContext, 'UDP:TEXT_ERROR', `Failed to read error text: ${textError.message}`);
+        logger.warn('UDP:TEXT_ERROR', `Failed to read error text: ${textError.message}`);
       }
       throw new Error(`DoH request failed with status ${response.status}: ${errorText}`);
     }
@@ -223,7 +223,7 @@ async function processDnsPacket(dnsQuery, webSocket, config, logContext) {
     const resultSize = dnsResult.byteLength;
 
     if (resultSize === 0) {
-      logger.warn(logContext, 'UDP:EMPTY_RESPONSE', 'DoH returned empty response');
+      logger.warn('UDP:EMPTY_RESPONSE', 'DoH returned empty response');
       return;
     }
 
@@ -242,6 +242,6 @@ async function processDnsPacket(dnsQuery, webSocket, config, logContext) {
       throw new Error(`Failed to send response: ${sendError.message}`);
     }
   } catch (error) {
-    logger.error(logContext, 'UDP:PACKET_ERROR', `Failed to process DNS packet: ${error.message}`);
+    logger.error('UDP:PACKET_ERROR', `Failed to process DNS packet: ${error.message}`);
   }
 }
