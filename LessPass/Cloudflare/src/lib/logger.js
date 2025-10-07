@@ -101,6 +101,6 @@ export function generateLogId() {
     return Math.random().toString(36).substring(2, 8);
   } catch (error) {
     console.error(`[LOGGER] generateLogId error: ${error.message}`);
-    return 'ERROR';
+    throw new Error(`Failed to generate log ID: ${error.message}`);
   }
 }
