@@ -53,16 +53,14 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
         if (connection) {
           logger.info(relayLogContext, 'TCP:RETRY_SUCCESS', 'Relay connection established.');
           await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
+        } else {
+          logger.error(tcpLogContext, 'TCP:ALL_FAILED', 'Both primary and relay connections failed.');
+          webSocket.close(1011, 'Connection failed');
         }
       } catch (error) {
         logger.error(relayLogContext, 'TCP:RETRY_FAIL', `Relay connection to ${relayAddr}:${relayPort} failed:`, error.message);
       } finally {
         if (connection) connection.remoteReader.releaseLock();
-      }
-
-      if (!connection) {
-        logger.error(tcpLogContext, 'TCP:ALL_FAILED', 'Both primary and relay connections failed.');
-        webSocket.close(1011, 'Connection failed');
       }
     }
   } catch (err) {
