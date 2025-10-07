@@ -85,14 +85,14 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
 
     // --- Retry Logic ---
     if (!connection) {
-      logger.info(tcpLogContext, 'TCP:RETRY_TRIGGER', 'Attempting connection to relay address.');
+      logger.info({ section: 'TCP_PROXY' }, 'TCP:RETRY_TRIGGER', 'Attempting connection to relay address.');
       
       if (!config.RELAY_ADDR) {
-        logger.error(tcpLogContext, 'TCP:NO_RELAY', 'No relay address configured');
+        logger.error({ section: 'TCP_PROXY' }, 'TCP:NO_RELAY', 'No relay address configured');
         try {
           webSocket.close(1011, 'Connection failed: No relay');
         } catch (closeError) {
-          logger.error(tcpLogContext, 'TCP:CLOSE_ERROR', `Failed to close WebSocket: ${closeError.message}`);
+          logger.error({ section: 'TCP_PROXY' }, 'TCP:CLOSE_ERROR', `Failed to close WebSocket: ${closeError.message}`);
         }
         return;
       }
@@ -101,47 +101,47 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
       const relayPort = relayPortStr ? parseInt(relayPortStr, 10) : port;
       
       if (!relayAddr) {
-        logger.error(tcpLogContext, 'TCP:INVALID_RELAY', 'Invalid relay address format');
+        logger.error({ section: 'TCP_PROXY' }, 'TCP:INVALID_RELAY', 'Invalid relay address format');
         try {
           webSocket.close(1011, 'Connection failed: Invalid relay');
         } catch (closeError) {
-          logger.error(tcpLogContext, 'TCP:CLOSE_ERROR', `Failed to close WebSocket: ${closeError.message}`);
+          logger.error({ section: 'TCP_PROXY' }, 'TCP:CLOSE_ERROR', `Failed to close WebSocket: ${closeError.message}`);
         }
         return;
       }
 
-      const relayLogContext = { ...tcpLogContext, remoteAddress: relayAddr, remotePort: relayPort };
+      logger.updateRemoteAddress(relayAddr, relayPort);
 
       try {
-        connection = await testConnection(relayAddr, relayPort, initialPayload, relayLogContext);
+        connection = await testConnection(relayAddr, relayPort, initialPayload, { section: 'TCP_PROXY' });
         if (connection) {
-          logger.info(relayLogContext, 'TCP:RETRY_SUCCESS', 'Relay connection established.');
+          logger.info({ section: 'TCP_PROXY' }, 'TCP:RETRY_SUCCESS', 'Relay connection established.');
           try {
             await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
           } catch (proxyError) {
-            logger.error(relayLogContext, 'TCP:PROXY_ERROR', `Relay proxy failed: ${proxyError.message}`);
+            logger.error({ section: 'TCP_PROXY' }, 'TCP:PROXY_ERROR', `Relay proxy failed: ${proxyError.message}`);
           }
         } else {
-          logger.error(tcpLogContext, 'TCP:ALL_FAILED', 'Both primary and relay connections failed.');
+          logger.error({ section: 'TCP_PROXY' }, 'TCP:ALL_FAILED', 'Both primary and relay connections failed.');
           try {
             webSocket.close(1011, 'Connection failed');
           } catch (closeError) {
-            logger.error(tcpLogContext, 'TCP:CLOSE_ERROR', `Failed to close WebSocket: ${closeError.message}`);
+            logger.error({ section: 'TCP_PROXY' }, 'TCP:CLOSE_ERROR', `Failed to close WebSocket: ${closeError.message}`);
           }
         }
       } catch (error) {
-        logger.error(relayLogContext, 'TCP:RETRY_FAIL', `Relay connection to ${relayAddr}:${relayPort} failed: ${error.message}`);
+        logger.error({ section: 'TCP_PROXY' }, 'TCP:RETRY_FAIL', `Relay connection to ${relayAddr}:${relayPort} failed: ${error.message}`);
         try {
           webSocket.close(1011, 'Connection failed');
         } catch (closeError) {
-          logger.error(tcpLogContext, 'TCP:CLOSE_ERROR', `Failed to close WebSocket: ${closeError.message}`);
+          logger.error({ section: 'TCP_PROXY' }, 'TCP:CLOSE_ERROR', `Failed to close WebSocket: ${closeError.message}`);
         }
       } finally {
         if (connection && connection.remoteReader) {
           try {
             connection.remoteReader.releaseLock();
           } catch (lockError) {
-            logger.warn(relayLogContext, 'TCP:LOCK_RELEASE_ERROR', `Failed to release reader lock: ${lockError.message}`);
+            logger.warn({ section: 'TCP_PROXY' }, 'TCP:LOCK_RELEASE_ERROR', `Failed to release reader lock: ${lockError.message}`);
           }
         }
       }

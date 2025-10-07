@@ -26,6 +26,10 @@ export const logger = {
   setRequestContext(logId, clientIP) {
     globalRequestContext = { logId, clientIP };
   },
+  updateRemoteAddress(remoteAddress, remotePort) {
+    globalRequestContext.remoteAddress = remoteAddress;
+    globalRequestContext.remotePort = remotePort;
+  },
   clearRequestContext() {
     globalRequestContext = {};
   },
