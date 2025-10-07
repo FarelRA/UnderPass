@@ -3,7 +3,7 @@
 // Description: Structured logging utility.
 // =================================================================
 
-export const LOG_LEVELS = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3 };
+export const LOG_LEVELS = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, TRACE: 4 };
 
 function formatLogMessage(level, message, context = {}, additionalInfo = '', ...optionalParams) {
   try {
@@ -70,6 +70,15 @@ export const logger = {
       }
     } catch (error) {
       console.error(`[LOGGER] error logging failed: ${error.message}`);
+    }
+  },
+  trace(context, additionalInfo, message, ...optionalParams) {
+    try {
+      if (this.logLevel >= LOG_LEVELS.TRACE) {
+        console.log(formatLogMessage('TRACE', message, context, additionalInfo, ...optionalParams));
+      }
+    } catch (error) {
+      console.error(`[LOGGER] trace error: ${error.message}`);
     }
   },
 };
