@@ -7,7 +7,7 @@ import { VLESS } from '../lib/config.js';
 import { logger } from '../lib/logger.js';
 import { handleTcpProxy } from '../protocol/tcp.js';
 import { handleUdpProxy } from '../protocol/udp.js';
-import { createConsumableStream, getFirstChunk, stringifyUUID } from '../lib/utils.js';
+import { initializeWebSocketStream, stringifyUUID } from '../lib/utils.js';
 
 /**
  * Orchestrates an incoming VLESS WebSocket request.
@@ -37,7 +37,7 @@ export function handleVlessRequest(request, config, logContext) {
  * @param {object} logContext The logging context.
  */
 async function processVlessConnection(server, request, config, logContext) {
-  const firstChunk = await getFirstChunk(server, request);
+  const { firstChunk, wsStream } = await initializeWebSocketStream(server, request);
 
   const { vlessVersion, userID, protocol, address, port, payload } = processVlessHeader(firstChunk);
   if (stringifyUUID(userID) !== config.USER_ID) {
@@ -47,8 +47,6 @@ async function processVlessConnection(server, request, config, logContext) {
   logContext.remoteAddress = address;
   logContext.remotePort = port;
   logger.info(logContext, 'CONNECTION', `Processing ${protocol} request for ${address}:${port}`);
-
-  const wsStream = createConsumableStream(server);
 
   if (protocol === 'UDP') {
     if (port !== 53) {

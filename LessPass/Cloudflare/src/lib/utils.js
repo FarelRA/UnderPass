@@ -7,24 +7,27 @@ import { byteToHex, WS_READY_STATE } from './config.js';
 import { logger } from './logger.js';
 
 /**
- * Awaits the first data chunk from a WebSocket, checking for early data first.
+ * Gets the first chunk and creates a stream for subsequent messages.
  * @param {WebSocket} server The server-side WebSocket.
  * @param {Request} request The incoming request.
- * @returns {Promise<Uint8Array>} A promise that resolves with the first data chunk.
- * @throws {Error} If the WebSocket closes or errors before data is received, or if early data is malformed.
+ * @returns {Promise<{firstChunk: Uint8Array, wsStream: ReadableStream}>}
  */
-export async function getFirstChunk(server, request) {
-  const earlyDataHeader = request.headers.get('Sec-WebSocket-Protocol') || '';
+export async function initializeWebSocketStream(server, request) {
+  const earlyDataHeader = request.headers.get('Sec-WebSocket-Protocol');
+  
   if (earlyDataHeader) {
-    return base64ToUint8Array(earlyDataHeader);
+    return {
+      firstChunk: base64ToUint8Array(earlyDataHeader),
+      wsStream: createConsumableStream(server)
+    };
   }
 
-  // If no early data, wait for the first 'message' event.
-  return new Promise((resolve, reject) => {
-    server.addEventListener('message', (event) => resolve(new Uint8Array(event.data)), { once: true });
-    server.addEventListener('close', () => reject(new Error('WebSocket closed before receiving any data.')), { once: true });
-    server.addEventListener('error', (err) => reject(new Error(`WebSocket error before receiving data: ${err}`)), { once: true });
-  });
+  const wsStream = createConsumableStream(server);
+  const reader = wsStream.getReader();
+  const firstChunk = (await reader.read()).value;
+  reader.releaseLock();
+  
+  return { firstChunk, wsStream };
 }
 
 /**
