@@ -18,15 +18,49 @@ import { initializeWebSocketStream, stringifyUUID } from '../lib/utils.js';
  */
 export function handleVlessRequest(request, config, logContext) {
   const vlessLogContext = { ...logContext, section: 'VLESS' };
-  const { 0: client, 1: server } = new WebSocketPair();
-  server.accept();
 
-  processVlessConnection(server, request, config, vlessLogContext).catch((err) => {
-    logger.error(vlessLogContext, 'CONNECTION_SETUP_ERROR', 'Failed to process VLESS connection:', err.message);
-    server.close(1011, `SETUP_ERROR: ${err.message}`);
-  });
+  try {
+    if (!request) {
+      logger.error(vlessLogContext, 'INVALID_REQUEST', 'Request is null/undefined');
+      return new Response('Bad Request', { status: 400 });
+    }
 
-  return new Response(null, { status: 101, webSocket: client });
+    if (!config) {
+      logger.error(vlessLogContext, 'INVALID_CONFIG', 'Config is null/undefined');
+      return new Response('Internal Server Error', { status: 500 });
+    }
+
+    let client, server;
+    try {
+      const pair = new WebSocketPair();
+      client = pair[0];
+      server = pair[1];
+    } catch (wsError) {
+      logger.error(vlessLogContext, 'WEBSOCKET_PAIR_ERROR', `Failed to create WebSocket pair: ${wsError.message}`);
+      return new Response('WebSocket creation failed', { status: 500 });
+    }
+
+    try {
+      server.accept();
+    } catch (acceptError) {
+      logger.error(vlessLogContext, 'WEBSOCKET_ACCEPT_ERROR', `Failed to accept WebSocket: ${acceptError.message}`);
+      return new Response('WebSocket accept failed', { status: 500 });
+    }
+
+    processVlessConnection(server, request, config, vlessLogContext).catch((err) => {
+      logger.error(vlessLogContext, 'CONNECTION_SETUP_ERROR', `Failed to process VLESS connection: ${err.message}`);
+      try {
+        server.close(1011, `SETUP_ERROR: ${err.message}`);
+      } catch (closeError) {
+        logger.error(vlessLogContext, 'CLOSE_ERROR', `Failed to close WebSocket after error: ${closeError.message}`);
+      }
+    });
+
+    return new Response(null, { status: 101, webSocket: client });
+  } catch (error) {
+    logger.error(vlessLogContext, 'VLESS_HANDLER_ERROR', `Unhandled error in handleVlessRequest: ${error.message}`);
+    return new Response('Internal Server Error', { status: 500 });
+  }
 }
 
 /**
@@ -37,24 +71,70 @@ export function handleVlessRequest(request, config, logContext) {
  * @param {object} logContext The logging context.
  */
 async function processVlessConnection(server, request, config, logContext) {
-  const { firstChunk, wsStream } = await initializeWebSocketStream(server, request);
+  if (!server) {
+    throw new Error('WebSocket server is null/undefined');
+  }
 
-  const { vlessVersion, userID, protocol, address, port, payload } = processVlessHeader(firstChunk);
-  if (stringifyUUID(userID) !== config.USER_ID) {
-    throw new Error('Invalid user ID.');
+  if (!request) {
+    throw new Error('Request is null/undefined');
+  }
+
+  if (!config) {
+    throw new Error('Config is null/undefined');
+  }
+
+  let firstChunk, wsStream;
+  try {
+    const result = await initializeWebSocketStream(server, request);
+    firstChunk = result.firstChunk;
+    wsStream = result.wsStream;
+  } catch (streamError) {
+    throw new Error(`Failed to initialize WebSocket stream: ${streamError.message}`);
+  }
+
+  if (!firstChunk || firstChunk.byteLength === 0) {
+    throw new Error('First chunk is empty or invalid');
+  }
+
+  let vlessVersion, userID, protocol, address, port, payload;
+  try {
+    const parsed = processVlessHeader(firstChunk);
+    vlessVersion = parsed.vlessVersion;
+    userID = parsed.userID;
+    protocol = parsed.protocol;
+    address = parsed.address;
+    port = parsed.port;
+    payload = parsed.payload;
+  } catch (headerError) {
+    throw new Error(`Failed to process VLESS header: ${headerError.message}`);
+  }
+
+  let userIDString;
+  try {
+    userIDString = stringifyUUID(userID);
+  } catch (uuidError) {
+    throw new Error(`Failed to stringify user ID: ${uuidError.message}`);
+  }
+
+  if (userIDString !== config.USER_ID) {
+    throw new Error(`Invalid user ID. Expected: ${config.USER_ID}, Got: ${userIDString}`);
   }
 
   logContext.remoteAddress = address;
   logContext.remotePort = port;
   logger.info(logContext, 'CONNECTION', `Processing ${protocol} request for ${address}:${port}`);
 
-  if (protocol === 'UDP') {
-    if (port !== 53) {
-      throw new Error('UDP is only supported for DNS on port 53.');
+  try {
+    if (protocol === 'UDP') {
+      if (port !== 53) {
+        throw new Error(`UDP is only supported for DNS on port 53, got port ${port}`);
+      }
+      await handleUdpProxy(server, payload, wsStream, vlessVersion, config, logContext);
+    } else {
+      await handleTcpProxy(server, payload, wsStream, address, port, vlessVersion, config, logContext);
     }
-    await handleUdpProxy(server, payload, wsStream, vlessVersion, config, logContext);
-  } else {
-    await handleTcpProxy(server, payload, wsStream, address, port, vlessVersion, config, logContext);
+  } catch (proxyError) {
+    throw new Error(`Proxy handler failed: ${proxyError.message}`);
   }
 }
 
@@ -65,58 +145,137 @@ async function processVlessConnection(server, request, config, logContext) {
  * @throws {Error} If the header is malformed, too short, or uses unsupported options.
  */
 export function processVlessHeader(chunk) {
+  if (!chunk || !(chunk instanceof Uint8Array)) {
+    throw new Error('Chunk must be a Uint8Array');
+  }
+
   if (chunk.byteLength < VLESS.MIN_HEADER_LENGTH) {
     throw new Error(`Invalid VLESS header: insufficient length. Got ${chunk.byteLength}, expected at least ${VLESS.MIN_HEADER_LENGTH}.`);
   }
 
-  const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-  let offset = 0;
-
-  const vlessVersion = chunk.slice(offset, VLESS.VERSION_LENGTH);
-  offset += VLESS.VERSION_LENGTH;
-
-  const userID = chunk.slice(offset, offset + VLESS.USERID_LENGTH);
-  offset += VLESS.USERID_LENGTH;
-
-  const addonLength = chunk[offset];
-  offset += 1 + addonLength;
-
-  const command = chunk[offset];
-  offset += 1;
-
-  const protocol = command === VLESS.COMMAND.TCP ? 'TCP' : command === VLESS.COMMAND.UDP ? 'UDP' : null;
-  if (!protocol) throw new Error(`Unsupported VLESS command: ${command}`);
-
-  const port = view.getUint16(offset);
-  offset += 2;
-
-  const addressType = chunk[offset];
-  offset += 1;
-  let address;
-
-  switch (addressType) {
-    case VLESS.ADDRESS_TYPE.IPV4:
-      address = `${chunk[offset]}.${chunk[offset + 1]}.${chunk[offset + 2]}.${chunk[offset + 3]}`;
-      offset += 4;
-      break;
-    case VLESS.ADDRESS_TYPE.FQDN:
-      const domainLength = chunk[offset];
-      offset += 1;
-      address = new TextDecoder().decode(chunk.slice(offset, offset + domainLength));
-      offset += domainLength;
-      break;
-    case VLESS.ADDRESS_TYPE.IPV6:
-      const parts = [];
-      for (let i = 0; i < 8; i++) {
-        parts.push(view.getUint16(offset + i * 2).toString(16));
-      }
-      address = `[${parts.join(':')}]`;
-      offset += 16;
-      break;
-    default:
-      throw new Error(`Invalid address type: ${addressType}`);
+  let view;
+  try {
+    view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+  } catch (viewError) {
+    throw new Error(`Failed to create DataView: ${viewError.message}`);
   }
 
-  const payload = chunk.slice(offset);
+  let offset = 0;
+
+  let vlessVersion;
+  try {
+    vlessVersion = chunk.slice(offset, VLESS.VERSION_LENGTH);
+    offset += VLESS.VERSION_LENGTH;
+  } catch (error) {
+    throw new Error(`Failed to extract VLESS version: ${error.message}`);
+  }
+
+  let userID;
+  try {
+    userID = chunk.slice(offset, offset + VLESS.USERID_LENGTH);
+    offset += VLESS.USERID_LENGTH;
+  } catch (error) {
+    throw new Error(`Failed to extract user ID: ${error.message}`);
+  }
+
+  let addonLength;
+  try {
+    addonLength = chunk[offset];
+    if (typeof addonLength !== 'number') {
+      throw new Error('Addon length is not a number');
+    }
+    offset += 1 + addonLength;
+  } catch (error) {
+    throw new Error(`Failed to parse addon section: ${error.message}`);
+  }
+
+  if (offset >= chunk.byteLength) {
+    throw new Error('Header truncated after addon section');
+  }
+
+  let command;
+  try {
+    command = chunk[offset];
+    offset += 1;
+  } catch (error) {
+    throw new Error(`Failed to extract command: ${error.message}`);
+  }
+
+  const protocol = command === VLESS.COMMAND.TCP ? 'TCP' : command === VLESS.COMMAND.UDP ? 'UDP' : null;
+  if (!protocol) {
+    throw new Error(`Unsupported VLESS command: ${command}`);
+  }
+
+  if (offset + 2 > chunk.byteLength) {
+    throw new Error('Header truncated before port');
+  }
+
+  let port;
+  try {
+    port = view.getUint16(offset);
+    offset += 2;
+  } catch (error) {
+    throw new Error(`Failed to extract port: ${error.message}`);
+  }
+
+  if (offset >= chunk.byteLength) {
+    throw new Error('Header truncated before address type');
+  }
+
+  let addressType;
+  try {
+    addressType = chunk[offset];
+    offset += 1;
+  } catch (error) {
+    throw new Error(`Failed to extract address type: ${error.message}`);
+  }
+
+  let address;
+  try {
+    switch (addressType) {
+      case VLESS.ADDRESS_TYPE.IPV4:
+        if (offset + 4 > chunk.byteLength) {
+          throw new Error('Insufficient data for IPv4 address');
+        }
+        address = `${chunk[offset]}.${chunk[offset + 1]}.${chunk[offset + 2]}.${chunk[offset + 3]}`;
+        offset += 4;
+        break;
+      case VLESS.ADDRESS_TYPE.FQDN:
+        if (offset >= chunk.byteLength) {
+          throw new Error('Insufficient data for FQDN length');
+        }
+        const domainLength = chunk[offset];
+        offset += 1;
+        if (offset + domainLength > chunk.byteLength) {
+          throw new Error('Insufficient data for FQDN');
+        }
+        address = new TextDecoder().decode(chunk.slice(offset, offset + domainLength));
+        offset += domainLength;
+        break;
+      case VLESS.ADDRESS_TYPE.IPV6:
+        if (offset + 16 > chunk.byteLength) {
+          throw new Error('Insufficient data for IPv6 address');
+        }
+        const parts = [];
+        for (let i = 0; i < 8; i++) {
+          parts.push(view.getUint16(offset + i * 2).toString(16));
+        }
+        address = `[${parts.join(':')}]`;
+        offset += 16;
+        break;
+      default:
+        throw new Error(`Invalid address type: ${addressType}`);
+    }
+  } catch (error) {
+    throw new Error(`Failed to parse address: ${error.message}`);
+  }
+
+  let payload;
+  try {
+    payload = chunk.slice(offset);
+  } catch (error) {
+    throw new Error(`Failed to extract payload: ${error.message}`);
+  }
+
   return { vlessVersion, userID, protocol, address, port, payload };
 }

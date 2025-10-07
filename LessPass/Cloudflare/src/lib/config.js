@@ -20,13 +20,39 @@ const defaultConfig = {
  * @returns {object} A finalized, request-scoped configuration object.
  */
 export function initializeConfig(url, env) {
-  return {
-    USER_ID: env.USER_ID || defaultConfig.USER_ID,
-    PASSWORD: env.PASSWORD || defaultConfig.PASSWORD,
-    RELAY_ADDR: url.searchParams.get('relay') || env.RELAY_ADDR || defaultConfig.RELAY_ADDR,
-    DOH_URL: url.searchParams.get('doh') || env.DOH_URL || defaultConfig.DOH_URL,
-    LOG_LEVEL: url.searchParams.get('log') || env.LOG_LEVEL || defaultConfig.LOG_LEVEL,
-  };
+  if (!url) {
+    throw new Error('URL parameter is required for config initialization');
+  }
+
+  if (!env || typeof env !== 'object') {
+    throw new Error('Environment object is required for config initialization');
+  }
+
+  try {
+    const config = {
+      USER_ID: env.USER_ID || defaultConfig.USER_ID,
+      PASSWORD: env.PASSWORD || defaultConfig.PASSWORD,
+      RELAY_ADDR: url.searchParams.get('relay') || env.RELAY_ADDR || defaultConfig.RELAY_ADDR,
+      DOH_URL: url.searchParams.get('doh') || env.DOH_URL || defaultConfig.DOH_URL,
+      LOG_LEVEL: url.searchParams.get('log') || env.LOG_LEVEL || defaultConfig.LOG_LEVEL,
+    };
+
+    if (!config.USER_ID || typeof config.USER_ID !== 'string') {
+      throw new Error('USER_ID must be a non-empty string');
+    }
+
+    if (!config.RELAY_ADDR || typeof config.RELAY_ADDR !== 'string') {
+      throw new Error('RELAY_ADDR must be a non-empty string');
+    }
+
+    if (!config.DOH_URL || typeof config.DOH_URL !== 'string') {
+      throw new Error('DOH_URL must be a non-empty string');
+    }
+
+    return config;
+  } catch (error) {
+    throw new Error(`Config initialization failed: ${error.message}`);
+  }
 }
 
 /**
