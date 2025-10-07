@@ -23,7 +23,7 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
   const tcpLogContext = { ...logContext, section: 'TCP_PROXY' };
   let primaryConnectionSuccessful = false;
 
-  const attemptConnection = async (host, portNum) => {
+  const attemptConnection = async (host, portNum, sendPayload) => {
     logger.info(tcpLogContext, 'TCP:ATTEMPT', `Connecting to: ${host}:${portNum}`);
     const remoteSocket = await connect({ hostname: host, port: portNum });
 
@@ -31,13 +31,28 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
     const remoteWriter = remoteSocket.writable.getWriter();
 
     try {
+      if (sendPayload && initialPayload.byteLength > 0) {
+        await remoteWriter.write(initialPayload);
+      }
+
+      const firstResponse = await Promise.race([
+        remoteReader.read(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('Timeout')), 1000))
+      ]);
+
+      if (firstResponse.done) {
+        return false;
+      }
+
+      webSocket.send(firstResponse.value);
+
       const [clientToRemote, remoteToClient] = [
-        pumpClientToRemote(initialPayload, wsStream, remoteWriter),
+        pumpWebSocketToRemote(wsStream, remoteWriter),
         pumpRemoteToClient(remoteReader, webSocket),
       ];
 
-      const [hasClientSentData, hasRemoteSentData] = await Promise.all([clientToRemote, remoteToClient]);
-      return hasClientSentData && hasRemoteSentData;
+      await Promise.all([clientToRemote, remoteToClient]);
+      return true;
     } finally {
       remoteReader.releaseLock();
     }
@@ -48,7 +63,7 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
 
     // --- Primary Connection Attempt ---
     try {
-      primaryConnectionSuccessful = await attemptConnection(address, port);
+      primaryConnectionSuccessful = await attemptConnection(address, port, true);
       if (primaryConnectionSuccessful) {
         logger.info(tcpLogContext, 'TCP:PRIMARY_SUCCESS', 'Primary connection finished with data exchange.');
       } else {
@@ -66,7 +81,7 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
       const relayLogContext = { ...tcpLogContext, remoteAddress: relayAddr, remotePort: relayPort };
 
       try {
-        await attemptConnection(relayAddr, relayPort);
+        await attemptConnection(relayAddr, relayPort, true);
         logger.info(relayLogContext, 'TCP:RETRY_SUCCESS', 'Relay connection process finished.');
       } catch (error) {
         logger.error(relayLogContext, 'TCP:RETRY_FAIL', `Relay connection to ${relayAddr}:${relayPort} failed:`, error.message);
@@ -80,50 +95,35 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
 }
 
 /**
- * Pumps data from client to remote socket. Sends initialPayload first, then streams from WebSocket.
- * @returns {Promise<boolean>} True if any data was sent.
+ * Pumps data from WebSocket stream to remote socket.
  */
-async function pumpClientToRemote(initialPayload, wsStream, writer) {
-  let hasSentData = false;
+async function pumpWebSocketToRemote(wsStream, writer) {
+  const reader = wsStream.getReader();
   try {
-    if (initialPayload.byteLength > 0) {
-      await writer.write(initialPayload);
-      hasSentData = true;
-    }
-
-    const reader = wsStream.getReader();
-    try {
-      while (true) {
-        const { value, done } = await reader.read();
-        if (done) break;
-        await writer.write(value);
-        hasSentData = true;
-      }
-    } finally {
-      reader.releaseLock();
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      await writer.write(value);
     }
     await writer.close();
   } catch (error) {
     await writer.abort(error).catch(() => {});
+  } finally {
+    reader.releaseLock();
   }
-  return hasSentData;
 }
 
 /**
  * Pumps data from remote socket to client WebSocket.
- * @returns {Promise<boolean>} True if any data was received.
  */
 async function pumpRemoteToClient(reader, webSocket) {
-  let hasReceivedData = false;
   try {
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
       webSocket.send(value);
-      hasReceivedData = true;
     }
   } catch (error) {
     await reader.cancel(error).catch(() => {});
   }
-  return hasReceivedData;
 }
