@@ -63,8 +63,9 @@ export async function handleUdpProxy(webSocket, initialPayload, wsStream, vlessV
 async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, logContext) {
   const processChunk = async (chunk) => {
     if (!chunk || !(chunk instanceof Uint8Array)) {
-      logger.warn(logContext, 'UDP:INVALID_CHUNK', 'Received invalid chunk data');
-      return;
+      const error = new Error('Received invalid chunk data');
+      logger.warn(logContext, 'UDP:INVALID_CHUNK', error.message);
+      throw error;
     }
 
     let view;
@@ -72,7 +73,7 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, logC
       view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
     } catch (viewError) {
       logger.error(logContext, 'UDP:VIEW_ERROR', `Failed to create DataView: ${viewError.message}`);
-      return;
+      throw new Error(`Failed to create DataView: ${viewError.message}`);
     }
 
     for (let offset = 0; offset < chunk.byteLength; ) {
@@ -164,18 +165,21 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, logC
  */
 async function processDnsPacket(dnsQuery, webSocket, config, logContext) {
   if (!dnsQuery || !(dnsQuery instanceof Uint8Array)) {
-    logger.error(logContext, 'UDP:INVALID_QUERY', 'DNS query must be a Uint8Array');
-    return;
+    const error = new Error('DNS query must be a Uint8Array');
+    logger.error(logContext, 'UDP:INVALID_QUERY', error.message);
+    throw error;
   }
 
   if (!webSocket) {
-    logger.error(logContext, 'UDP:NO_WEBSOCKET', 'WebSocket is null/undefined');
-    return;
+    const error = new Error('WebSocket is null/undefined');
+    logger.error(logContext, 'UDP:NO_WEBSOCKET', error.message);
+    throw error;
   }
 
   if (!config || !config.DOH_URL) {
-    logger.error(logContext, 'UDP:NO_DOH_URL', 'DOH_URL is not configured');
-    return;
+    const error = new Error('DOH_URL is not configured');
+    logger.error(logContext, 'UDP:NO_DOH_URL', error.message);
+    throw error;
   }
 
   try {
