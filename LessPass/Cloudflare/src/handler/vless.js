@@ -51,9 +51,7 @@ export function handleVlessRequest(request, config) {
     }
 
     logger.info('VLESS:PROCESSING', 'Starting VLESS connection processing');
-    const logContext = logger.getLogContext();
-    processVlessConnection(server, request, config, logContext).catch((err) => {
-      logger.setLogContext(logContext);
+    processVlessConnection(server, request, config).catch((err) => {
       logger.error('VLESS:CONNECTION_SETUP_ERROR', `Failed to process VLESS connection: ${err.message}`);
       try {
         server.close(1011, `SETUP_ERROR: ${err.message}`);
@@ -75,10 +73,8 @@ export function handleVlessRequest(request, config) {
  * @param {WebSocket} server The server-side of the WebSocketPair.
  * @param {Request} request The original incoming request.
  * @param {object} config The request-scoped configuration.
- * @param {object} logContext The logging context to restore.
  */
-async function processVlessConnection(server, request, config, logContext) {
-  logger.setLogContext(logContext);
+async function processVlessConnection(server, request, config) {
   logger.trace('VLESS:PROCESS', 'processVlessConnection started');
 
   if (!server) {

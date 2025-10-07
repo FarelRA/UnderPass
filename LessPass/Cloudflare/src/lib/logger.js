@@ -24,9 +24,6 @@ export const logger = {
   setLogContext(context) {
     globalLogContext = { ...context };
   },
-  getLogContext() {
-    return { ...globalLogContext };
-  },
   updateLogContext(context) {
     globalLogContext = { ...globalLogContext, ...context };
   },
