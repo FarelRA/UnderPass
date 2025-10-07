@@ -83,7 +83,6 @@ async function testConnection(host, port, initialPayload, logContext) {
     }
 
     const firstResponse = await remoteReader.read();
-
     if (firstResponse.done) {
       return null;
     }
