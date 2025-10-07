@@ -16,8 +16,8 @@ const MASQUERADE_RESPONSE = `<!DOCTYPE html><html><head><title>404 Not Found</ti
  * @param {object} logContext Logging context.
  * @returns {Promise<Response>}
  */
-export async function handleHttpRequest(request, env, config, logContext) {
-  const httpLogContext = { ...logContext, section: 'HTTP' };
+export async function handleHttpRequest(request, env, config) {
+  
 
   try {
     if (!request || !request.url) {
@@ -63,7 +63,7 @@ export async function handleHttpRequest(request, env, config, logContext) {
  * @param {object} logContext Logging context.
  * @returns {Response}
  */
-function handleInfoRequest(request, config, logContext) {
+function handleInfoRequest(request, config) {
   if (!request) {
     throw new Error('Request is null/undefined');
   }
