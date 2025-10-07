@@ -21,7 +21,8 @@ export default {
     const logContext = { logId, clientIP };
 
     try {
-      const config = initializeConfig(new URL(request.url), env);
+      const url = new URL(request.url);
+      const config = initializeConfig(url, env);
       logger.setLogLevel(config.LOG_LEVEL);
 
       if (request.headers.get('Upgrade') === 'websocket') {
@@ -32,7 +33,7 @@ export default {
         return handleHttpRequest(request, env, config, logContext);
       }
     } catch (err) {
-      logger.error({ ...logContext, section: 'WORKER' }, 'FATAL', 'Unhandled top-level error:', err.stack || err);
+      logger.error({ ...logContext, section: 'WORKER' }, 'FATAL', 'Unhandled top-level error:', err.message);
       return new Response('Internal Server Error', { status: 500 });
     }
   },

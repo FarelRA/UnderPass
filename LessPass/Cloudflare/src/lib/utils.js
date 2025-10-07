@@ -28,26 +28,17 @@ export async function getFirstChunk(server, request) {
 }
 
 /**
- * Creates a ReadableStream from a WebSocket that starts with an initial payload,
- * then seamlessly continues with subsequent WebSocket messages.
+ * Creates a ReadableStream from WebSocket messages.
  * @param {WebSocket} server The server-side WebSocket.
- * @param {Uint8Array} initialPayload The first chunk of data (e.g., VLESS payload).
- * @param {object} logContext Logging context for cleanup actions.
  * @returns {ReadableStream}
  */
-export function createConsumableStream(server, initialPayload, logContext) {
-  let isStreamCancelled = false;
+export function createConsumableStream(server) {
   return new ReadableStream({
     start(controller) {
-      if (initialPayload.byteLength > 0) {
-        controller.enqueue(initialPayload);
-      }
       server.addEventListener('message', (event) => {
-        if (isStreamCancelled) return;
         controller.enqueue(new Uint8Array(event.data));
       });
       server.addEventListener('close', () => {
-        if (isStreamCancelled) return;
         try {
           controller.close();
         } catch (e) {
@@ -56,28 +47,21 @@ export function createConsumableStream(server, initialPayload, logContext) {
       });
       server.addEventListener('error', (err) => controller.error(err));
     },
-    pull() {
-      /* No backpressure needed */
-    },
-    cancel() {
-      isStreamCancelled = true;
-      safeCloseWebSocket(server, logContext);
-    },
   });
 }
 
 /**
  * Decodes a base64 string (URL-safe) to a Uint8Array.
  * @param {string} base64Str The base64-encoded string.
- * @returns {Uint8Array | null} The decoded data, or null if the input string is empty.
+ * @returns {Uint8Array} The decoded data.
  * @throws {Error} If the base64 string is malformed.
  */
 export function base64ToUint8Array(base64Str) {
   try {
-    const padded = base64Str.replace(/-/g, '+').replace(/_/g, '/') + '=='.substring(0, (3 * base64Str.length) % 4);
-    const decoded = atob(padded);
+    const base64 = base64Str.replace(/-/g, '+').replace(/_/g, '/');
+    const decoded = atob(base64);
     const uint8Array = new Uint8Array(decoded.length);
-    for (let i = 0; i < decoded.length; ++i) {
+    for (let i = 0; i < decoded.length; i++) {
       uint8Array[i] = decoded.charCodeAt(i);
     }
     return uint8Array;
@@ -93,8 +77,8 @@ export function base64ToUint8Array(base64Str) {
  */
 export function safeCloseWebSocket(socket, logContext) {
   try {
-    if (socket.readyState === WS_READY_STATE.OPEN || socket.readyState === WS_READY_STATE.CLOSING) {
-      socket.close(1000, 'Connection closed by worker.');
+    if (socket.readyState < WS_READY_STATE.CLOSING) {
+      socket.close();
     }
   } catch (error) {
     logger.error(logContext, 'safeCloseWebSocket', 'Error closing WebSocket:', error);
