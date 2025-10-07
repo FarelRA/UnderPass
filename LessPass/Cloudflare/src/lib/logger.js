@@ -7,15 +7,13 @@ export const LOG_LEVELS = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, TRACE: 4 };
 
 let globalLogContext = {};
 
-function formatLogMessage(level, message, context = {}, additionalInfo = '', ...optionalParams) {
+function formatLogMessage(level, section, message, ...optionalParams) {
   try {
     const timestamp = new Date().toISOString();
-    const mergedContext = { ...globalLogContext, ...context };
-    const { logId = 'N/A', section = 'N/A', clientIP = 'N/A', remoteAddress, remotePort } = mergedContext;
-    const fullSection = additionalInfo ? `${section}:${additionalInfo}` : section;
+    const { logId = 'N/A', clientIP = 'N/A', remoteAddress, remotePort } = globalLogContext;
     const remote = remoteAddress && remotePort ? `[Remote: ${remoteAddress}:${remotePort}] ` : '';
     const optionalData = optionalParams.length > 0 ? ` ${JSON.stringify(optionalParams)}` : '';
-    return `[${timestamp}] [${level}] [${logId}] [${fullSection}] [Client: ${clientIP}] ${remote}${message}${optionalData}`;
+    return `[${timestamp}] [${level}] [${logId}] [${section}] [Client: ${clientIP}] ${remote}${message}${optionalData}`;
   } catch (error) {
     return `[LOGGER] Failed to format log message: ${error.message}`;
   }
@@ -45,46 +43,46 @@ export const logger = {
       console.error(`[LOGGER] setLogLevel error: ${error.message}`);
     }
   },
-  debug(context, additionalInfo, message, ...optionalParams) {
+  debug(section, message, ...optionalParams) {
     try {
       if (this.logLevel >= LOG_LEVELS.DEBUG) {
-        console.debug(formatLogMessage('DEBUG', message, context, additionalInfo, ...optionalParams));
+        console.debug(formatLogMessage('DEBUG', section, message, ...optionalParams));
       }
     } catch (error) {
       console.error(`[LOGGER] debug error: ${error.message}`);
     }
   },
-  info(context, additionalInfo, message, ...optionalParams) {
+  info(section, message, ...optionalParams) {
     try {
       if (this.logLevel >= LOG_LEVELS.INFO) {
-        console.info(formatLogMessage('INFO', message, context, additionalInfo, ...optionalParams));
+        console.info(formatLogMessage('INFO', section, message, ...optionalParams));
       }
     } catch (error) {
       console.error(`[LOGGER] info error: ${error.message}`);
     }
   },
-  warn(context, additionalInfo, message, ...optionalParams) {
+  warn(section, message, ...optionalParams) {
     try {
       if (this.logLevel >= LOG_LEVELS.WARN) {
-        console.warn(formatLogMessage('WARN', message, context, additionalInfo, ...optionalParams));
+        console.warn(formatLogMessage('WARN', section, message, ...optionalParams));
       }
     } catch (error) {
       console.error(`[LOGGER] warn error: ${error.message}`);
     }
   },
-  error(context, additionalInfo, message, ...optionalParams) {
+  error(section, message, ...optionalParams) {
     try {
       if (this.logLevel >= LOG_LEVELS.ERROR) {
-        console.error(formatLogMessage('ERROR', message, context, additionalInfo, ...optionalParams));
+        console.error(formatLogMessage('ERROR', section, message, ...optionalParams));
       }
     } catch (error) {
       console.error(`[LOGGER] error logging failed: ${error.message}`);
     }
   },
-  trace(context, additionalInfo, message, ...optionalParams) {
+  trace(section, message, ...optionalParams) {
     try {
       if (this.logLevel >= LOG_LEVELS.TRACE) {
-        console.log(formatLogMessage('TRACE', message, context, additionalInfo, ...optionalParams));
+        console.log(formatLogMessage('TRACE', section, message, ...optionalParams));
       }
     } catch (error) {
       console.error(`[LOGGER] trace error: ${error.message}`);
