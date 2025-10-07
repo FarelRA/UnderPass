@@ -64,7 +64,11 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
         try {
           await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
         } catch (proxyError) {
-          logger.error('TCP_PROXY:PROXY_ERROR', `Proxy failed: ${proxyError.message}`);
+          if (proxyError.message.includes('closed') || proxyError.message.includes('abort')) {
+            logger.warn('TCP_PROXY:PROXY_CLOSED', `Connection closed: ${proxyError.message}`);
+          } else {
+            logger.error('TCP_PROXY:PROXY_ERROR', `Proxy failed: ${proxyError.message}`);
+          }
         }
       } else {
         logger.warn('TCP_PROXY:PRIMARY_IDLE', 'Primary connection closed without data exchange.');
@@ -117,7 +121,11 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
           try {
             await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
           } catch (proxyError) {
-            logger.error('TCP_PROXY:PROXY_ERROR', `Relay proxy failed: ${proxyError.message}`);
+            if (proxyError.message.includes('closed') || proxyError.message.includes('abort')) {
+              logger.warn('TCP_PROXY:PROXY_CLOSED', `Connection closed: ${proxyError.message}`);
+            } else {
+              logger.error('TCP_PROXY:PROXY_ERROR', `Relay proxy failed: ${proxyError.message}`);
+            }
           }
         } else {
           logger.error('TCP_PROXY:ALL_FAILED', 'Both primary and relay connections failed.');
