@@ -83,8 +83,6 @@ export default {
     } catch (err) {
       logger.error('WORKER:FATAL', `Unhandled top-level error: ${err.message}`, err.stack);
       return new Response('Internal Server Error', { status: 500 });
-    } finally {
-      logger.setLogContext({});
     }
   },
 };
