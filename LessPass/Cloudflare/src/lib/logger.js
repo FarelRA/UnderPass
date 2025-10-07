@@ -17,7 +17,7 @@ function formatLogMessage(level, message, context = {}, additionalInfo = '', ...
     const optionalData = optionalParams.length > 0 ? ` ${JSON.stringify(optionalParams)}` : '';
     return `[${timestamp}] [${level}] [${logId}] [${fullSection}] [Client: ${clientIP}] ${remote}${message}${optionalData}`;
   } catch (error) {
-    return `[LOG_FORMAT_ERROR] Failed to format log message: ${error.message}`;
+    return `[LOGGER] Failed to format log message: ${error.message}`;
   }
 }
 
