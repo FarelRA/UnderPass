@@ -21,15 +21,8 @@ const defaultConfig = {
  */
 export function initializeConfig(url, env) {
   return {
-    // Start with defaults
-    ...defaultConfig,
-    // Override with environment variables
     USER_ID: env.USER_ID || defaultConfig.USER_ID,
-    RELAY_ADDR: env.RELAY_ADDR || defaultConfig.RELAY_ADDR,
-    DOH_URL: env.DOH_URL || defaultConfig.DOH_URL,
     PASSWORD: env.PASSWORD || defaultConfig.PASSWORD,
-    LOG_LEVEL: env.LOG_LEVEL || defaultConfig.LOG_LEVEL,
-    // Override with URL parameters
     RELAY_ADDR: url.searchParams.get('relay') || env.RELAY_ADDR || defaultConfig.RELAY_ADDR,
     DOH_URL: url.searchParams.get('doh') || env.DOH_URL || defaultConfig.DOH_URL,
     LOG_LEVEL: url.searchParams.get('log') || env.LOG_LEVEL || defaultConfig.LOG_LEVEL,

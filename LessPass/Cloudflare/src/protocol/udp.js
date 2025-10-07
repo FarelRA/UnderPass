@@ -10,12 +10,13 @@ import { safeCloseWebSocket } from '../lib/utils.js';
  * Main handler for UDP proxying. Its primary responsibilities are to perform
  * the initial VLESS handshake and orchestrate the main proxying loop.
  * @param {WebSocket} webSocket The client WebSocket.
- * @param {ReadableStream} consumableStream The client data stream.
+ * @param {Uint8Array} initialPayload The payload from VLESS header parsing.
+ * @param {ReadableStream} wsStream The WebSocket message stream.
  * @param {Uint8Array} vlessVersion VLESS version bytes.
  * @param {object} config The request-scoped configuration.
  * @param {object} logContext Logging context.
  */
-export async function handleUdpProxy(webSocket, consumableStream, vlessVersion, config, logContext) {
+export async function handleUdpProxy(webSocket, initialPayload, wsStream, vlessVersion, config, logContext) {
   const udpLogContext = { ...logContext, section: 'UDP_PROXY' };
 
   try {
@@ -23,7 +24,7 @@ export async function handleUdpProxy(webSocket, consumableStream, vlessVersion, 
     webSocket.send(new Uint8Array([vlessVersion[0], 0]));
 
     // Start the main proxying loop.
-    await proxyUdpOverDoH(webSocket, consumableStream, config, udpLogContext);
+    await proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, udpLogContext);
   } catch (error) {
     logger.error(udpLogContext, 'UDP:FATAL_ERROR', 'An unrecoverable error occurred in the UDP handler:', error);
   } finally {
@@ -37,53 +38,51 @@ export async function handleUdpProxy(webSocket, consumableStream, vlessVersion, 
  * client packets and process them individually.
  * This function is the architectural equivalent of TCP's `attemptConnection`.
  * @param {WebSocket} webSocket The client WebSocket.
- * @param {ReadableStream} consumableStream The client data stream.
+ * @param {Uint8Array} initialPayload The payload from VLESS header parsing.
+ * @param {ReadableStream} wsStream The WebSocket message stream.
  * @param {object} config The request-scoped configuration.
  * @param {object} logContext Logging context.
  */
-async function proxyUdpOverDoH(webSocket, consumableStream, config, logContext) {
-  const vlessUdpParser = createVlessUdpParser(logContext);
-
-  await consumableStream.pipeThrough(vlessUdpParser).pipeTo(
-    new WritableStream({
-      async write(dnsQuery) {
-        await processDnsPacket(dnsQuery, webSocket, config, logContext);
-      },
-      close() {
-        logger.info(logContext, 'UDP:CLOSE', 'Client UDP stream closed.');
-      },
-      abort(reason) {
-        logger.warn(logContext, 'UDP:ABORT', 'Client UDP stream aborted:', reason);
-      },
-    })
-  );
-}
-
-/**
- * Creates a TransformStream to parse VLESS UDP packets.
- * This is a low-level helper for the UDP proxy.
- * @param {object} logContext Logging context.
- * @returns {TransformStream}
- */
-function createVlessUdpParser(logContext) {
-  return new TransformStream({
-    transform(chunk, controller) {
-      for (let offset = 0; offset < chunk.byteLength; ) {
-        if (offset + 2 > chunk.byteLength) {
-          logger.warn(logContext, 'UDP:PARSE', 'Incomplete length header in VLESS UDP chunk.');
-          break;
-        }
-        const length = new DataView(chunk.buffer, chunk.byteOffset).getUint16(offset);
-        offset += 2;
-        if (offset + length > chunk.byteLength) {
-          logger.warn(logContext, 'UDP:PARSE', 'Incomplete VLESS UDP packet payload.');
-          break;
-        }
-        controller.enqueue(chunk.slice(offset, offset + length));
-        offset += length;
+async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, logContext) {
+  const processChunk = async (chunk) => {
+    const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+    for (let offset = 0; offset < chunk.byteLength; ) {
+      if (offset + 2 > chunk.byteLength) {
+        logger.warn(logContext, 'UDP:PARSE', 'Incomplete length header in VLESS UDP chunk.');
+        break;
       }
-    },
-  });
+      const length = view.getUint16(offset);
+      offset += 2;
+      if (offset + length > chunk.byteLength) {
+        logger.warn(logContext, 'UDP:PARSE', 'Incomplete VLESS UDP packet payload.');
+        break;
+      }
+      await processDnsPacket(chunk.slice(offset, offset + length), webSocket, config, logContext);
+      offset += length;
+    }
+  };
+
+  // Process initial payload
+  if (initialPayload.byteLength > 0) {
+    await processChunk(initialPayload);
+  }
+
+  // Process WebSocket stream
+  const reader = wsStream.getReader();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        logger.info(logContext, 'UDP:CLOSE', 'Client UDP stream closed.');
+        break;
+      }
+      await processChunk(value);
+    }
+  } catch (error) {
+    logger.warn(logContext, 'UDP:ABORT', 'Client UDP stream aborted:', error);
+  } finally {
+    reader.releaseLock();
+  }
 }
 
 /**

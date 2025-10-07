@@ -5,6 +5,8 @@
 
 import { logger } from '../lib/logger.js';
 
+const MASQUERADE_RESPONSE = `<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>`;
+
 /**
  * Main HTTP request handler. Routes to the info endpoint or returns a
  * masquerading 404 page for all other paths.
@@ -19,28 +21,26 @@ export async function handleHttpRequest(request, env, config, logContext) {
   const httpLogContext = { ...logContext, section: 'HTTP' };
 
   if (url.pathname.endsWith('/info')) {
-    return handleInfoRequest(request, env, config, httpLogContext);
+    return handleInfoRequest(request, config, httpLogContext);
   }
 
   logger.info(httpLogContext, 'MASQUERADE', 'Returning 404 Not Found.');
-  return new Response(
-    `<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>`,
-    { status: 404, headers: { 'Content-Type': 'text/html' } }
-  );
+  return new Response(MASQUERADE_RESPONSE, { status: 404, headers: { 'Content-Type': 'text/html' } });
 }
 
 /**
  * Handles requests to the "/info" endpoint, providing diagnostic information.
  * Requires Basic Authentication using the configured password.
  * @param {Request} request The incoming request.
- * @param {object} env The environment variables.
  * @param {object} config The request-scoped configuration.
  * @param {object} logContext Logging context.
  * @returns {Response}
  */
-function handleInfoRequest(request, env, config, logContext) {
+function handleInfoRequest(request, config, logContext) {
   const authHeader = request.headers.get('Authorization');
-  if (!authHeader || authHeader !== `Basic ${btoa(':' + config.PASSWORD)}`) {
+  const expectedAuth = `Basic ${btoa(':' + config.PASSWORD)}`;
+  
+  if (authHeader !== expectedAuth) {
     logger.warn(logContext, 'HTTP:AUTH_FAIL', 'Unauthorized access attempt to /info.');
     return new Response('Unauthorized', {
       status: 401,
@@ -57,7 +57,6 @@ function handleInfoRequest(request, env, config, logContext) {
       cf: request.cf,
     },
     config,
-    env,
   };
 
   return new Response(JSON.stringify(info, null, 2), {

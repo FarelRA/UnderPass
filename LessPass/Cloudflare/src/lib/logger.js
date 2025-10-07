@@ -17,7 +17,10 @@ function formatLogMessage(level, message, context = {}, additionalInfo = '', ...
 export const logger = {
   logLevel: LOG_LEVELS.INFO,
   setLogLevel(level) {
-    this.logLevel = LOG_LEVELS[String(level).toUpperCase()] ?? this.logLevel;
+    const upperLevel = String(level).toUpperCase();
+    if (upperLevel in LOG_LEVELS) {
+      this.logLevel = LOG_LEVELS[upperLevel];
+    }
   },
   debug(context, additionalInfo, message, ...optionalParams) {
     if (this.logLevel >= LOG_LEVELS.DEBUG) {

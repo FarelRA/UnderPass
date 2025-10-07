@@ -48,14 +48,15 @@ async function processVlessConnection(server, request, config, logContext) {
   logContext.remotePort = port;
   logger.info(logContext, 'CONNECTION', `Processing ${protocol} request for ${address}:${port}`);
 
-  const consumableStream = createConsumableStream(server, payload, logContext);
+  const wsStream = createConsumableStream(server);
+
   if (protocol === 'UDP') {
     if (port !== 53) {
       throw new Error('UDP is only supported for DNS on port 53.');
     }
-    await handleUdpProxy(server, consumableStream, vlessVersion, config, logContext);
+    await handleUdpProxy(server, payload, wsStream, vlessVersion, config, logContext);
   } else {
-    await handleTcpProxy(server, consumableStream, address, port, vlessVersion, config, logContext);
+    await handleTcpProxy(server, payload, wsStream, address, port, vlessVersion, config, logContext);
   }
 }
 
@@ -79,31 +80,29 @@ export function processVlessHeader(chunk) {
   const userID = chunk.slice(offset, offset + VLESS.USERID_LENGTH);
   offset += VLESS.USERID_LENGTH;
 
-  const addonLength = view.getUint8(offset);
-  offset += 1 + addonLength; // Skip addon section
+  const addonLength = chunk[offset];
+  offset += 1 + addonLength;
 
-  const command = view.getUint8(offset);
+  const command = chunk[offset];
   offset += 1;
 
-  let protocol;
-  if (command === VLESS.COMMAND.TCP) protocol = 'TCP';
-  else if (command === VLESS.COMMAND.UDP) protocol = 'UDP';
-  else throw new Error(`Unsupported VLESS command: ${command}`);
+  const protocol = command === VLESS.COMMAND.TCP ? 'TCP' : command === VLESS.COMMAND.UDP ? 'UDP' : null;
+  if (!protocol) throw new Error(`Unsupported VLESS command: ${command}`);
 
   const port = view.getUint16(offset);
   offset += 2;
 
-  const addressType = view.getUint8(offset);
+  const addressType = chunk[offset];
   offset += 1;
   let address;
 
   switch (addressType) {
     case VLESS.ADDRESS_TYPE.IPV4:
-      address = Array.from(chunk.slice(offset, offset + 4)).join('.');
+      address = `${chunk[offset]}.${chunk[offset + 1]}.${chunk[offset + 2]}.${chunk[offset + 3]}`;
       offset += 4;
       break;
     case VLESS.ADDRESS_TYPE.FQDN:
-      const domainLength = view.getUint8(offset);
+      const domainLength = chunk[offset];
       offset += 1;
       address = new TextDecoder().decode(chunk.slice(offset, offset + domainLength));
       offset += domainLength;
@@ -113,7 +112,7 @@ export function processVlessHeader(chunk) {
       for (let i = 0; i < 8; i++) {
         parts.push(view.getUint16(offset + i * 2).toString(16));
       }
-      address = `[${parts.join(':').replace(/:(:0)+:0/g, '::')}]`;
+      address = `[${parts.join(':')}]`;
       offset += 16;
       break;
     default:
