@@ -110,7 +110,7 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
         return;
       }
 
-      logger.updateRemoteAddress(relayAddr, relayPort);
+      logger.updateLogContext({ remoteAddress: relayAddr, remotePort: relayPort });
 
       try {
         connection = await testConnection(relayAddr, relayPort, initialPayload, { section: 'TCP_PROXY' });

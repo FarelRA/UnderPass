@@ -142,7 +142,7 @@ async function processVlessConnection(server, request, config) {
 
   logger.info({ section: 'VLESS' }, 'AUTH_SUCCESS', `User authenticated: ${userIDString}`);
 
-  logger.updateRemoteAddress(address, port);
+  logger.updateLogContext({ remoteAddress: address, remotePort: port });
   logger.info({ section: 'VLESS' }, 'CONNECTION', `Processing ${protocol} request for ${address}:${port}`);
 
   try {

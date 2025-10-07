@@ -19,7 +19,7 @@ export default {
     const logId = generateLogId();
     const clientIP = request.headers.get('CF-Connecting-IP') || 'N/A';
     
-    logger.setRequestContext(logId, clientIP);
+    logger.setLogContext({ logId, clientIP });
     logger.trace({ section: 'WORKER' }, 'ENTRY', 'Worker fetch handler invoked');
 
     try {
@@ -84,7 +84,7 @@ export default {
       logger.error({ section: 'WORKER' }, 'FATAL', `Unhandled top-level error: ${err.message}`, err.stack);
       return new Response('Internal Server Error', { status: 500 });
     } finally {
-      logger.clearRequestContext();
+      logger.setLogContext({});
     }
   },
 };
