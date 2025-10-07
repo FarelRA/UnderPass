@@ -59,6 +59,11 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
       } finally {
         if (connection) connection.remoteReader.releaseLock();
       }
+
+      if (!connection) {
+        logger.error(tcpLogContext, 'TCP:ALL_FAILED', 'Both primary and relay connections failed.');
+        webSocket.close(1011, 'Connection failed');
+      }
     }
   } catch (err) {
     logger.error(tcpLogContext, 'TCP:FATAL_ERROR', 'An unexpected error occurred in the TCP handler:', err.message);
