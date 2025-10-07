@@ -189,7 +189,7 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
     // --- Primary Connection Attempt ---
     let connection = null;
     try {
-      connection = await testConnection(address, port, initialPayload, tcpLogContext);
+      connection = await testConnection(address, port, initialPayload);
       if (connection) {
         logger.info('TCP:PRIMARY_SUCCESS', 'Primary connection established.');
         try {
@@ -242,7 +242,7 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
       logger.updateLogContext({ remoteAddress: relayAddr, remotePort: relayPort });
 
       try {
-        connection = await testConnection(relayAddr, relayPort, initialPayload, { section: 'TCP_PROXY' });
+        connection = await testConnection(relayAddr, relayPort, initialPayload);
         if (connection) {
           logger.info('TCP_PROXY:TCP:RETRY_SUCCESS', 'Relay connection established.');
           try {
@@ -278,7 +278,7 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
   } catch (err) {
     logger.error('TCP:FATAL_ERROR', `An unexpected error occurred in the TCP handler: ${err.message}`);
   } finally {
-    safeCloseWebSocket(webSocket, tcpLogContext);
+    safeCloseWebSocket(webSocket);
   }
 }
 

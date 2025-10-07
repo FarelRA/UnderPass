@@ -42,11 +42,11 @@ export async function handleUdpProxy(webSocket, initialPayload, wsStream, vlessV
       throw new Error(`Failed to send VLESS handshake: ${sendError.message}`);
     }
 
-    await proxyUdpOverDoH(webSocket, initialPayload, wsStream, config, udpLogContext);
+    await proxyUdpOverDoH(webSocket, initialPayload, wsStream, config);
   } catch (error) {
     logger.error('UDP:FATAL_ERROR', `An unrecoverable error occurred in the UDP handler: ${error.message}`);
   } finally {
-    safeCloseWebSocket(webSocket, udpLogContext);
+    safeCloseWebSocket(webSocket);
   }
 }
 
@@ -97,7 +97,7 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config) {
       }
 
       try {
-        await processDnsPacket(chunk.slice(offset, offset + length), webSocket, config, logContext);
+        await processDnsPacket(chunk.slice(offset, offset + length), webSocket, config);
       } catch (packetError) {
         logger.error('UDP:PACKET_PROCESS_ERROR', `Failed to process packet: ${packetError.message}`);
       }

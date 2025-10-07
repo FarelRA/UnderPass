@@ -40,7 +40,7 @@ export async function handleHttpRequest(request, env, config) {
 
     if (url.pathname.endsWith('/info')) {
       try {
-        return handleInfoRequest(request, config, httpLogContext);
+        return handleInfoRequest(request, config);
       } catch (infoError) {
         logger.error('INFO_HANDLER_ERROR', `Info handler failed: ${infoError.message}`);
         return new Response('Internal Server Error', { status: 500 });
@@ -86,7 +86,7 @@ function handleInfoRequest(request, config) {
   let expectedAuth;
   try {
     expectedAuth = `Basic ${btoa(':' + config.PASSWORD)}`;
-  } catch (btoa Error) {
+  } catch (btoaError) {
     logger.error('BTOA_ERROR', `Failed to encode password: ${btoaError.message}`);
     return new Response('Internal Server Error', { status: 500 });
   }
