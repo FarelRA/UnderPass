@@ -22,19 +22,19 @@ const defaultConfig = {
  * @returns {object} A finalized, request-scoped configuration object.
  */
 export function initializeConfig(url, env) {
-  logger.trace({}, 'CONFIG', 'initializeConfig called');
+  logger.trace('CONFIG', 'initializeConfig called');
 
   if (!url) {
-    logger.error({}, 'CONFIG', 'URL parameter is null/undefined');
+    logger.error('CONFIG', 'URL parameter is null/undefined');
     throw new Error('URL parameter is required for config initialization');
   }
 
   if (!env || typeof env !== 'object') {
-    logger.error({}, 'CONFIG', 'Environment object is invalid');
+    logger.error('CONFIG', 'Environment object is invalid');
     throw new Error('Environment object is required for config initialization');
   }
 
-  logger.debug({}, 'CONFIG', 'Validating environment variables');
+  logger.debug('CONFIG', 'Validating environment variables');
 
   try {
     const config = {
@@ -45,31 +45,31 @@ export function initializeConfig(url, env) {
       LOG_LEVEL: url.searchParams.get('log') || env.LOG_LEVEL || defaultConfig.LOG_LEVEL,
     };
 
-    logger.trace({}, 'CONFIG', `USER_ID source: ${env.USER_ID ? 'env' : 'default'}`);
-    logger.trace({}, 'CONFIG', `PASSWORD source: ${env.PASSWORD ? 'env' : 'default'}`);
-    logger.trace({}, 'CONFIG', `RELAY_ADDR source: ${url.searchParams.get('relay') ? 'url' : env.RELAY_ADDR ? 'env' : 'default'}`);
-    logger.trace({}, 'CONFIG', `DOH_URL source: ${url.searchParams.get('doh') ? 'url' : env.DOH_URL ? 'env' : 'default'}`);
-    logger.trace({}, 'CONFIG', `LOG_LEVEL source: ${url.searchParams.get('log') ? 'url' : env.LOG_LEVEL ? 'env' : 'default'}`);
+    logger.trace('CONFIG', `USER_ID source: ${env.USER_ID ? 'env' : 'default'}`);
+    logger.trace('CONFIG', `PASSWORD source: ${env.PASSWORD ? 'env' : 'default'}`);
+    logger.trace('CONFIG', `RELAY_ADDR source: ${url.searchParams.get('relay') ? 'url' : env.RELAY_ADDR ? 'env' : 'default'}`);
+    logger.trace('CONFIG', `DOH_URL source: ${url.searchParams.get('doh') ? 'url' : env.DOH_URL ? 'env' : 'default'}`);
+    logger.trace('CONFIG', `LOG_LEVEL source: ${url.searchParams.get('log') ? 'url' : env.LOG_LEVEL ? 'env' : 'default'}`);
 
     if (!config.USER_ID || typeof config.USER_ID !== 'string') {
-      logger.error({}, 'CONFIG', 'USER_ID validation failed');
+      logger.error('CONFIG', 'USER_ID validation failed');
       throw new Error('USER_ID must be a non-empty string');
     }
 
     if (!config.RELAY_ADDR || typeof config.RELAY_ADDR !== 'string') {
-      logger.error({}, 'CONFIG', 'RELAY_ADDR validation failed');
+      logger.error('CONFIG', 'RELAY_ADDR validation failed');
       throw new Error('RELAY_ADDR must be a non-empty string');
     }
 
     if (!config.DOH_URL || typeof config.DOH_URL !== 'string') {
-      logger.error({}, 'CONFIG', 'DOH_URL validation failed');
+      logger.error('CONFIG', 'DOH_URL validation failed');
       throw new Error('DOH_URL must be a non-empty string');
     }
 
-    logger.debug({}, 'CONFIG', `Configuration initialized successfully with LOG_LEVEL=${config.LOG_LEVEL}`);
+    logger.debug('CONFIG', `Configuration initialized successfully with LOG_LEVEL=${config.LOG_LEVEL}`);
     return config;
   } catch (error) {
-    logger.error({}, 'CONFIG', `Config initialization failed: ${error.message}`);
+    logger.error('CONFIG', `Config initialization failed: ${error.message}`);
     throw new Error(`Config initialization failed: ${error.message}`);
   }
 }
