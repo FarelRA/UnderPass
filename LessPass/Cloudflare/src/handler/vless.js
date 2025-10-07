@@ -16,55 +16,54 @@ import { initializeWebSocketStream, stringifyUUID } from '../lib/utils.js';
  * @param {object} logContext The logging context.
  * @returns {Response} A 101 Switching Protocols response.
  */
-export function handleVlessRequest(request, config, logContext) {
-  const vlessLogContext = { ...logContext, section: 'VLESS' };
-  logger.trace(vlessLogContext, 'ENTRY', 'handleVlessRequest called');
+export function handleVlessRequest(request, config) {
+  logger.trace({ section: 'VLESS' }, 'ENTRY', 'handleVlessRequest called');
 
   try {
     if (!request) {
-      logger.error(vlessLogContext, 'INVALID_REQUEST', 'Request is null/undefined');
+      logger.error({ section: 'VLESS' }, 'INVALID_REQUEST', 'Request is null/undefined');
       return new Response('Bad Request', { status: 400 });
     }
 
     if (!config) {
-      logger.error(vlessLogContext, 'INVALID_CONFIG', 'Config is null/undefined');
+      logger.error({ section: 'VLESS' }, 'INVALID_CONFIG', 'Config is null/undefined');
       return new Response('Internal Server Error', { status: 500 });
     }
 
-    logger.debug(vlessLogContext, 'WS_PAIR', 'Creating WebSocket pair');
+    logger.debug({ section: 'VLESS' }, 'WS_PAIR', 'Creating WebSocket pair');
     let client, server;
     try {
       const pair = new WebSocketPair();
       client = pair[0];
       server = pair[1];
-      logger.trace(vlessLogContext, 'WS_PAIR', 'WebSocket pair created successfully');
+      logger.trace({ section: 'VLESS' }, 'WS_PAIR', 'WebSocket pair created successfully');
     } catch (wsError) {
-      logger.error(vlessLogContext, 'WEBSOCKET_PAIR_ERROR', `Failed to create WebSocket pair: ${wsError.message}`);
+      logger.error({ section: 'VLESS' }, 'WEBSOCKET_PAIR_ERROR', `Failed to create WebSocket pair: ${wsError.message}`);
       return new Response('WebSocket creation failed', { status: 500 });
     }
 
     try {
       server.accept();
-      logger.debug(vlessLogContext, 'WS_ACCEPT', 'WebSocket accepted');
+      logger.debug({ section: 'VLESS' }, 'WS_ACCEPT', 'WebSocket accepted');
     } catch (acceptError) {
-      logger.error(vlessLogContext, 'WEBSOCKET_ACCEPT_ERROR', `Failed to accept WebSocket: ${acceptError.message}`);
+      logger.error({ section: 'VLESS' }, 'WEBSOCKET_ACCEPT_ERROR', `Failed to accept WebSocket: ${acceptError.message}`);
       return new Response('WebSocket accept failed', { status: 500 });
     }
 
-    logger.info(vlessLogContext, 'PROCESSING', 'Starting VLESS connection processing');
-    processVlessConnection(server, request, config, vlessLogContext).catch((err) => {
-      logger.error(vlessLogContext, 'CONNECTION_SETUP_ERROR', `Failed to process VLESS connection: ${err.message}`);
+    logger.info({ section: 'VLESS' }, 'PROCESSING', 'Starting VLESS connection processing');
+    processVlessConnection(server, request, config).catch((err) => {
+      logger.error({ section: 'VLESS' }, 'CONNECTION_SETUP_ERROR', `Failed to process VLESS connection: ${err.message}`);
       try {
         server.close(1011, `SETUP_ERROR: ${err.message}`);
       } catch (closeError) {
-        logger.error(vlessLogContext, 'CLOSE_ERROR', `Failed to close WebSocket after error: ${closeError.message}`);
+        logger.error({ section: 'VLESS' }, 'CLOSE_ERROR', `Failed to close WebSocket after error: ${closeError.message}`);
       }
     });
 
-    logger.debug(vlessLogContext, 'RESPONSE', 'Returning 101 Switching Protocols');
+    logger.debug({ section: 'VLESS' }, 'RESPONSE', 'Returning 101 Switching Protocols');
     return new Response(null, { status: 101, webSocket: client });
   } catch (error) {
-    logger.error(vlessLogContext, 'VLESS_HANDLER_ERROR', `Unhandled error in handleVlessRequest: ${error.message}`);
+    logger.error({ section: 'VLESS' }, 'VLESS_HANDLER_ERROR', `Unhandled error in handleVlessRequest: ${error.message}`);
     return new Response('Internal Server Error', { status: 500 });
   }
 }
@@ -74,10 +73,9 @@ export function handleVlessRequest(request, config, logContext) {
  * @param {WebSocket} server The server-side of the WebSocketPair.
  * @param {Request} request The original incoming request.
  * @param {object} config The request-scoped configuration.
- * @param {object} logContext The logging context.
  */
-async function processVlessConnection(server, request, config, logContext) {
-  logger.trace(logContext, 'PROCESS', 'processVlessConnection started');
+async function processVlessConnection(server, request, config) {
+  logger.trace({ section: 'VLESS' }, 'PROCESS', 'processVlessConnection started');
 
   if (!server) {
     logger.error(logContext, 'NO_SERVER', 'WebSocket server is null/undefined');
