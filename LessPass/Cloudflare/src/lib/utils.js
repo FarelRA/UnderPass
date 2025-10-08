@@ -26,17 +26,36 @@ export async function getFirstChunk(server, request) {
     return base64ToUint8Array(earlyDataHeader);
   }
 
-  const wsStream = createConsumableStream(server);
-  const reader = wsStream.getReader();
-  try {
-    const { value, done } = await reader.read();
-    if (done || !value) {
-      throw new Error('WebSocket closed before receiving first chunk');
-    }
-    return value;
-  } finally {
-    reader.releaseLock();
-  }
+  return new Promise((resolve, reject) => {
+    const onMessage = (event) => {
+      cleanup();
+      if (!event?.data) {
+        reject(new Error('Received message with no data'));
+      } else {
+        resolve(new Uint8Array(event.data));
+      }
+    };
+    
+    const onClose = () => {
+      cleanup();
+      reject(new Error('WebSocket closed before receiving first chunk'));
+    };
+    
+    const onError = (err) => {
+      cleanup();
+      reject(err || new Error('WebSocket error'));
+    };
+    
+    const cleanup = () => {
+      server.removeEventListener('message', onMessage);
+      server.removeEventListener('close', onClose);
+      server.removeEventListener('error', onError);
+    };
+    
+    server.addEventListener('message', onMessage);
+    server.addEventListener('close', onClose);
+    server.addEventListener('error', onError);
+  });
 }
 
 /**
