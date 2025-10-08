@@ -7,8 +7,6 @@ import { connect } from 'cloudflare:sockets';
 import { logger } from '../lib/logger.js';
 import { safeCloseWebSocket } from '../lib/utils.js';
 
-const VLESS_RESPONSE = new Uint8Array([0, 0]);
-
 /**
  * Main handler for TCP proxying. Attempts a primary connection and conditionally
  * retries with a relay address if the primary connection is idle.
@@ -17,14 +15,11 @@ const VLESS_RESPONSE = new Uint8Array([0, 0]);
  * @param {ReadableStream} wsStream The WebSocket message stream (not yet consumed).
  * @param {string} address Destination address.
  * @param {number} port Destination port.
- * @param {Uint8Array} vlessVersion The VLESS version bytes.
  * @param {object} config The request-scoped configuration.
  * @returns {Promise<void>}
  * @throws {Error} If parameters are invalid or handshake fails.
  */
-export async function handleTcpProxy(webSocket, initialPayload, wsStream, address, port, vlessVersion, config) {
-  webSocket.send(VLESS_RESPONSE);
-
+export async function handleTcpProxy(webSocket, initialPayload, wsStream, address, port, config) {
   let connection = await testConnection(address, port, initialPayload);
   if (connection) {
     await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);

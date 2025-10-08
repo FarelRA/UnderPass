@@ -11,6 +11,8 @@ import { getFirstChunk, createConsumableStream, stringifyUUID } from '../lib/uti
 
 const textDecoder = new TextDecoder();
 
+export const VLESS_RESPONSE = new Uint8Array([0, 0]);
+
 /**
  * Orchestrates an incoming VLESS WebSocket request.
  * @param {Request} request The original incoming request.
@@ -56,13 +58,15 @@ async function processVlessConnection(server, request, config) {
   logger.updateLogContext({ remoteAddress: address, remotePort: port });
   logger.info('VLESS:CONN', `${protocol} ${address}:${port}`);
 
+  server.send(new Uint8Array([vlessVersion[0], 0]));
+
   if (protocol === 'UDP') {
     if (port !== 53) {
       throw new Error(`UDP only supports port 53`);
     }
-    await handleUdpProxy(server, payload, wsStream, vlessVersion, config);
+    await handleUdpProxy(server, payload, wsStream, config);
   } else {
-    await handleTcpProxy(server, payload, wsStream, address, port, vlessVersion, config);
+    await handleTcpProxy(server, payload, wsStream, address, port, config);
   }
 }
 
