@@ -16,42 +16,14 @@ const MASQUERADE_RESPONSE = `<!DOCTYPE html><html><head><title>404 Not Found</ti
  * @returns {Promise<Response>}
  */
 export async function handleHttpRequest(request, env, config) {
-  
+  const url = new URL(request.url);
 
-  try {
-    if (!request || !request.url) {
-      logger.error('INVALID_REQUEST', 'Request or request.url is null/undefined');
-      return new Response('Bad Request', { status: 400 });
-    }
-
-    if (!config) {
-      logger.error('INVALID_CONFIG', 'Config is null/undefined');
-      return new Response('Internal Server Error', { status: 500 });
-    }
-
-    let url;
-    try {
-      url = new URL(request.url);
-    } catch (urlError) {
-      logger.error('URL_PARSE_ERROR', `Failed to parse URL: ${urlError.message}`);
-      return new Response('Bad Request: Invalid URL', { status: 400 });
-    }
-
-    if (url.pathname.endsWith('/info')) {
-      try {
-        return handleInfoRequest(request, config);
-      } catch (infoError) {
-        logger.error('INFO_HANDLER_ERROR', `Info handler failed: ${infoError.message}`);
-        return new Response('Internal Server Error', { status: 500 });
-      }
-    }
-
-    logger.info('MASQUERADE', 'Returning 404 Not Found.');
-    return new Response(MASQUERADE_RESPONSE, { status: 404, headers: { 'Content-Type': 'text/html' } });
-  } catch (error) {
-    logger.error('HTTP_HANDLER_ERROR', `Unhandled error in handleHttpRequest: ${error.message}`);
-    return new Response('Internal Server Error', { status: 500 });
+  if (url.pathname.endsWith('/info')) {
+    return handleInfoRequest(request, config);
   }
+
+  logger.info('MASQUERADE', 'Returning 404 Not Found.');
+  return new Response(MASQUERADE_RESPONSE, { status: 404, headers: { 'Content-Type': 'text/html' } });
 }
 
 /**
@@ -62,32 +34,8 @@ export async function handleHttpRequest(request, env, config) {
  * @returns {Response}
  */
 function handleInfoRequest(request, config) {
-  if (!request) {
-    throw new Error('Request is null/undefined');
-  }
-
-  if (!config || !config.PASSWORD) {
-    throw new Error('Config or PASSWORD is null/undefined');
-  }
-
-  let authHeader;
-  try {
-    authHeader = request.headers.get('Authorization');
-  } catch (headerError) {
-    logger.error('AUTH_HEADER_ERROR', `Failed to get Authorization header: ${headerError.message}`);
-    return new Response('Unauthorized', {
-      status: 401,
-      headers: { 'WWW-Authenticate': 'Basic realm="VLESS Worker Info"' },
-    });
-  }
-
-  let expectedAuth;
-  try {
-    expectedAuth = `Basic ${btoa(':' + config.PASSWORD)}`;
-  } catch (btoaError) {
-    logger.error('BTOA_ERROR', `Failed to encode password: ${btoaError.message}`);
-    return new Response('Internal Server Error', { status: 500 });
-  }
+  const authHeader = request.headers.get('Authorization');
+  const expectedAuth = `Basic ${btoa(':' + config.PASSWORD)}`;
   
   if (authHeader !== expectedAuth) {
     logger.warn('HTTP:AUTH_FAIL', 'Unauthorized access attempt to /info.');
@@ -97,32 +45,18 @@ function handleInfoRequest(request, config) {
     });
   }
 
-  let info;
-  try {
-    info = {
-      status: 'OK',
-      request: {
-        method: request.method,
-        url: request.url,
-        headers: Object.fromEntries(request.headers.entries()),
-        cf: request.cf,
-      },
-      config,
-    };
-  } catch (infoError) {
-    logger.error('INFO_BUILD_ERROR', `Failed to build info object: ${infoError.message}`);
-    return new Response('Internal Server Error', { status: 500 });
-  }
+  const info = {
+    status: 'OK',
+    request: {
+      method: request.method,
+      url: request.url,
+      headers: Object.fromEntries(request.headers.entries()),
+      cf: request.cf,
+    },
+    config,
+  };
 
-  let jsonResponse;
-  try {
-    jsonResponse = JSON.stringify(info, null, 2);
-  } catch (jsonError) {
-    logger.error('JSON_STRINGIFY_ERROR', `Failed to stringify info: ${jsonError.message}`);
-    return new Response('Internal Server Error', { status: 500 });
-  }
-
-  return new Response(jsonResponse, {
+  return new Response(JSON.stringify(info, null, 2), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
