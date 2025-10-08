@@ -165,8 +165,8 @@ async function processVlessConnection(serverWebSocket, request, config) {
   logger.info('VLESS:CONNECTION', `Processing ${protocol} request to ${address}:${port}`);
 
   // === Step 6: Send VLESS Handshake Response ===
+  logger.debug('VLESS:HANDSHAKE', 'Sending VLESS handshake response to client');
   serverWebSocket.send(vlessResponse);
-  logger.debug('VLESS:HANDSHAKE', 'Sent VLESS handshake response to client');
 
   // === Step 7: Dispatch to Protocol Handler ===
   if (protocol === 'UDP') {
