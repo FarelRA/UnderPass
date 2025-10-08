@@ -27,34 +27,12 @@ export async function getFirstChunk(server, request) {
   }
 
   return new Promise((resolve, reject) => {
-    const onMessage = (event) => {
-      cleanup();
-      if (!event?.data) {
-        reject(new Error('Received message with no data'));
-      } else {
-        resolve(new Uint8Array(event.data));
-      }
-    };
+    server.addEventListener('message', (event) => {
+      resolve(event?.data ? new Uint8Array(event.data) : reject(new Error('No data in message')));
+    }, { once: true });
     
-    const onClose = () => {
-      cleanup();
-      reject(new Error('WebSocket closed before receiving first chunk'));
-    };
-    
-    const onError = (err) => {
-      cleanup();
-      reject(err || new Error('WebSocket error'));
-    };
-    
-    const cleanup = () => {
-      server.removeEventListener('message', onMessage);
-      server.removeEventListener('close', onClose);
-      server.removeEventListener('error', onError);
-    };
-    
-    server.addEventListener('message', onMessage);
-    server.addEventListener('close', onClose);
-    server.addEventListener('error', onError);
+    server.addEventListener('close', () => reject(new Error('WebSocket closed before first chunk')), { once: true });
+    server.addEventListener('error', (err) => reject(err || new Error('WebSocket error')), { once: true });
   });
 }
 
