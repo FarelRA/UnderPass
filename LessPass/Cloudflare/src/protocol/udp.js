@@ -6,6 +6,8 @@
 import { logger } from '../lib/logger.js';
 import { safeCloseWebSocket } from '../lib/utils.js';
 
+const VLESS_RESPONSE = new Uint8Array([0, 0]);
+
 /**
  * Main handler for UDP proxying. Its primary responsibilities are to perform
  * the initial VLESS handshake and orchestrate the main proxying loop.
@@ -18,7 +20,7 @@ import { safeCloseWebSocket } from '../lib/utils.js';
  * @throws {Error} If parameters are invalid or handshake fails.
  */
 export async function handleUdpProxy(webSocket, initialPayload, wsStream, vlessVersion, config) {
-  webSocket.send(new Uint8Array([vlessVersion[0], 0]));
+  webSocket.send(VLESS_RESPONSE);
   await proxyUdpOverDoH(webSocket, initialPayload, wsStream, config);
   safeCloseWebSocket(webSocket);
 }
@@ -38,20 +40,14 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config) {
     const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
 
     for (let offset = 0; offset < chunk.byteLength; ) {
-      if (offset + 2 > chunk.byteLength) {
-        logger.warn('UDP:PARSE', 'Incomplete length header in VLESS UDP chunk.');
-        break;
-      }
+      if (offset + 2 > chunk.byteLength) break;
 
       const length = view.getUint16(offset);
       offset += 2;
       
-      if (offset + length > chunk.byteLength) {
-        logger.warn('UDP:PARSE', 'Incomplete VLESS UDP packet payload.');
-        break;
-      }
+      if (offset + length > chunk.byteLength) break;
 
-      await processDnsPacket(chunk.slice(offset, offset + length), webSocket, config);
+      await processDnsPacket(chunk.subarray(offset, offset + length), webSocket, config);
       offset += length;
     }
   };
@@ -65,10 +61,7 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config) {
   try {
     while (true) {
       const { value, done } = await reader.read();
-      if (done) {
-        logger.info('UDP:CLOSE', 'Client UDP stream closed.');
-        break;
-      }
+      if (done) break;
       await processChunk(value);
     }
   } finally {

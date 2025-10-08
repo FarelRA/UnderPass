@@ -3,8 +3,6 @@
 // Description: Centralized configuration management.
 // =================================================================
 
-import { logger } from './logger.js';
-
 // Default configuration settings.
 const defaultConfig = {
   USER_ID: '86c50e3a-5b87-49dd-bd20-03c7f2735e40', // Your VLESS UUID

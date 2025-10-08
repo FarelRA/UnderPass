@@ -11,11 +11,10 @@ const MASQUERADE_RESPONSE = `<!DOCTYPE html><html><head><title>404 Not Found</ti
  * Main HTTP request handler. Routes to the info endpoint or returns a
  * masquerading 404 page for all other paths.
  * @param {Request} request The incoming request.
- * @param {object} env The environment variables.
  * @param {object} config The request-scoped configuration.
  * @returns {Promise<Response>}
  */
-export async function handleHttpRequest(request, env, config) {
+export async function handleHttpRequest(request, config) {
   const url = new URL(request.url);
 
   if (url.pathname.endsWith('/info')) {
