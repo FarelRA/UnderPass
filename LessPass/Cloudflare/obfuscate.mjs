@@ -6,15 +6,15 @@ const SOURCE_DIR = 'src';
 const OUTPUT_DIR = 'dist';
 
 const OBFUSCATION_MAP = {
-  vless: 'conduit',
-  Vless: 'Conduit',
-  VLESS: 'CONDUIT',
-  tunnel: 'passage',
-  Tunnel: 'Passage',
-  TUNNEL: 'PASSAGE',
-  proxy: 'channel',
-  Proxy: 'Channel',
-  PROXY: 'CHANNEL',
+  vless: 'vls',
+  Vless: 'Vls',
+  VLESS: 'VLS',
+  tunnel: 'tnl',
+  Tunnel: 'Tnl',
+  TUNNEL: 'TNL',
+  proxy: 'pry',
+  Proxy: 'Pry',
+  PROXY: 'PRY',
 };
 
 /**
