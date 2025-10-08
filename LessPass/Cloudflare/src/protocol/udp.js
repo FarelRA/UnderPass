@@ -6,21 +6,17 @@
 import { logger } from '../lib/logger.js';
 import { safeCloseWebSocket } from '../lib/utils.js';
 
-const VLESS_RESPONSE = new Uint8Array([0, 0]);
-
 /**
  * Main handler for UDP proxying. Its primary responsibilities are to perform
  * the initial VLESS handshake and orchestrate the main proxying loop.
  * @param {WebSocket} webSocket The client WebSocket.
  * @param {Uint8Array} initialPayload The payload from VLESS header parsing.
  * @param {ReadableStream} wsStream The WebSocket message stream.
- * @param {Uint8Array} vlessVersion VLESS version bytes.
  * @param {object} config The request-scoped configuration.
  * @returns {Promise<void>}
  * @throws {Error} If parameters are invalid or handshake fails.
  */
-export async function handleUdpProxy(webSocket, initialPayload, wsStream, vlessVersion, config) {
-  webSocket.send(VLESS_RESPONSE);
+export async function handleUdpProxy(webSocket, initialPayload, wsStream, config) {
   await proxyUdpOverDoH(webSocket, initialPayload, wsStream, config);
   safeCloseWebSocket(webSocket);
 }
