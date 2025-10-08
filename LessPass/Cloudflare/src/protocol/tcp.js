@@ -27,22 +27,22 @@ export async function handleTcpProxy(clientWebSocket, initialPayload, wsStream, 
   let connection = await testConnection(destinationAddress, destinationPort, initialPayload);
 
   if (connection) {
-    logger.info('TCP_PROXY:PRIMARY_SUCCESS', 'Primary connection established.');
+    logger.info('TCP:PROXY:PRIMARY:SUCCESS', 'Primary connection established.');
     await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, clientWebSocket);
     safeCloseWebSocket(clientWebSocket);
     return;
   }
 
-  logger.warn('TCP_PROXY:PRIMARY_IDLE', 'Primary connection closed without data exchange.');
+  logger.warn('TCP:PROXY:PRIMARY:IDLE', 'Primary connection closed without data exchange.');
 
   // === Attempt Relay Connection (Fallback) ===
   if (!config.RELAY_ADDR) {
-    logger.error('TCP_PROXY:NO_RELAY', 'No relay address configured');
+    logger.error('TCP:PROXY:NO:RELAY', 'No relay address configured');
     clientWebSocket.close(1011, 'Connection failed: No relay');
     return;
   }
 
-  logger.info('TCP_PROXY:RETRY_TRIGGER', 'Attempting connection to relay address.');
+  logger.info('TCP:PROXY:RETRY:TRIGGER', 'Attempting connection to relay address.');
 
   const [relayAddress, relayPortString] = config.RELAY_ADDR.split(':');
   const relayPort = relayPortString ? parseInt(relayPortString, 10) : destinationPort;
@@ -52,10 +52,10 @@ export async function handleTcpProxy(clientWebSocket, initialPayload, wsStream, 
   connection = await testConnection(relayAddress, relayPort, initialPayload);
 
   if (connection) {
-    logger.info('TCP_PROXY:RETRY_SUCCESS', 'Relay connection established.');
+    logger.info('TCP:PROXY:RETRY:SUCCESS', 'Relay connection established.');
     await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, clientWebSocket);
   } else {
-    logger.error('TCP_PROXY:ALL_FAILED', 'Both primary and relay connections failed.');
+    logger.error('TCP:PROXY:ALL:FAILED', 'Both primary and relay connections failed.');
     clientWebSocket.close(1011, 'Connection failed');
   }
 

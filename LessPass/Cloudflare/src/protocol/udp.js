@@ -106,7 +106,7 @@ async function processDnsPacket(dnsQuery, clientWebSocket, config) {
   });
 
   if (!response.ok) {
-    logger.error('UDP:DOH_ERROR', `DoH request failed with status ${response.status}`);
+    logger.error('UDP:DOH:ERROR', `DoH request failed with status ${response.status}`);
     return;
   }
 
@@ -115,7 +115,7 @@ async function processDnsPacket(dnsQuery, clientWebSocket, config) {
   const resultSize = dnsResult.byteLength;
 
   if (resultSize === 0) {
-    logger.warn('UDP:EMPTY_RESPONSE', 'DoH returned empty response');
+    logger.warn('UDP:EMPTY:RESPONSE', 'DoH returned empty response');
     return;
   }
 
