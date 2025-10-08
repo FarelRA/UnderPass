@@ -17,7 +17,8 @@ import { safeCloseWebSocket } from '../lib/utils.js';
  * @param {number} port Destination port.
  * @param {Uint8Array} vlessVersion The VLESS version bytes.
  * @param {object} config The request-scoped configuration.
- * @param {object} logContext Logging context.
+ * @returns {Promise<void>}
+ * @throws {Error} If parameters are invalid or handshake fails.
  */
 export async function handleTcpProxy(webSocket, initialPayload, wsStream, address, port, vlessVersion, config) {
   if (!webSocket) {
@@ -161,7 +162,11 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
 
 /**
  * Tests a TCP connection by sending payload and waiting for first response.
- * @returns {Promise<{remoteSocket, remoteReader, remoteWriter, firstResponse}|null>}
+ * @param {string} host The destination hostname or IP address.
+ * @param {number} port The destination port number.
+ * @param {Uint8Array} initialPayload The initial data to send.
+ * @returns {Promise<{remoteSocket: Socket, remoteReader: ReadableStreamDefaultReader, remoteWriter: WritableStreamDefaultWriter, firstResponse: Uint8Array}|null>} Connection objects or null if connection is idle.
+ * @throws {Error} If connection fails or parameters are invalid.
  */
 async function testConnection(host, port, initialPayload) {
   if (!host || typeof host !== 'string') {
@@ -214,6 +219,13 @@ async function testConnection(host, port, initialPayload) {
 
 /**
  * Proxies bidirectional data between WebSocket and remote socket.
+ * @param {ReadableStreamDefaultReader} remoteReader Reader for remote socket data.
+ * @param {WritableStreamDefaultWriter} remoteWriter Writer for remote socket data.
+ * @param {Uint8Array} firstResponse The first response from remote socket.
+ * @param {ReadableStream} wsStream The WebSocket message stream.
+ * @param {WebSocket} webSocket The client WebSocket.
+ * @returns {Promise<void>}
+ * @throws {Error} If proxying fails or parameters are invalid.
  */
 async function proxyConnection(remoteReader, remoteWriter, firstResponse, wsStream, webSocket) {
   if (!remoteReader || !remoteWriter || !firstResponse || !wsStream || !webSocket) {
@@ -239,6 +251,10 @@ async function proxyConnection(remoteReader, remoteWriter, firstResponse, wsStre
 
 /**
  * Pumps data from WebSocket stream to remote socket.
+ * @param {ReadableStream} wsStream The WebSocket message stream.
+ * @param {WritableStreamDefaultWriter} writer The remote socket writer.
+ * @returns {Promise<void>}
+ * @throws {Error} If pumping fails or parameters are invalid.
  */
 async function pumpWebSocketToRemote(wsStream, writer) {
   if (!wsStream || !writer) {
@@ -275,6 +291,10 @@ async function pumpWebSocketToRemote(wsStream, writer) {
 
 /**
  * Pumps data from remote socket to client WebSocket.
+ * @param {ReadableStreamDefaultReader} reader The remote socket reader.
+ * @param {WebSocket} webSocket The client WebSocket.
+ * @returns {Promise<void>}
+ * @throws {Error} If pumping fails or parameters are invalid.
  */
 async function pumpRemoteToClient(reader, webSocket) {
   if (!reader || !webSocket) {

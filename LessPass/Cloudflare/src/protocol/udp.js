@@ -14,7 +14,8 @@ import { safeCloseWebSocket } from '../lib/utils.js';
  * @param {ReadableStream} wsStream The WebSocket message stream.
  * @param {Uint8Array} vlessVersion VLESS version bytes.
  * @param {object} config The request-scoped configuration.
- * @param {object} logContext Logging context.
+ * @returns {Promise<void>}
+ * @throws {Error} If parameters are invalid or handshake fails.
  */
 export async function handleUdpProxy(webSocket, initialPayload, wsStream, vlessVersion, config) {
   
@@ -58,7 +59,7 @@ export async function handleUdpProxy(webSocket, initialPayload, wsStream, vlessV
  * @param {Uint8Array} initialPayload The payload from VLESS header parsing.
  * @param {ReadableStream} wsStream The WebSocket message stream.
  * @param {object} config The request-scoped configuration.
- * @param {object} logContext Logging context.
+ * @returns {Promise<void>}
  */
 async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config) {
   const processChunk = async (chunk) => {
@@ -161,7 +162,7 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config) {
  * @param {Uint8Array} dnsQuery The raw DNS query payload.
  * @param {WebSocket} webSocket The client WebSocket.
  * @param {object} config The request-scoped configuration.
- * @param {object} logContext Logging context.
+ * @returns {Promise<void>}
  */
 async function processDnsPacket(dnsQuery, webSocket, config) {
   if (!dnsQuery || !(dnsQuery instanceof Uint8Array)) {
