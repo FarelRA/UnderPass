@@ -18,7 +18,7 @@ const vlessResponse = new Uint8Array([0, 0]);
 /**
  * Orchestrates an incoming VLESS WebSocket request.
  * Creates a WebSocket pair, accepts the connection, and processes the VLESS protocol.
- * 
+ *
  * @param {Request} request - The original incoming HTTP request with WebSocket upgrade.
  * @param {object} config - The request-scoped configuration object.
  * @returns {Response} A 101 Switching Protocols response with the client WebSocket.
@@ -30,7 +30,7 @@ export function handleVlessRequest(request, config) {
   const pair = new WebSocketPair();
   const clientWebSocket = pair[0];
   const serverWebSocket = pair[1];
-  
+
   serverWebSocket.accept();
   logger.debug('VLESS:WS_ACCEPT', 'WebSocket accepted');
 
@@ -50,7 +50,7 @@ export function handleVlessRequest(request, config) {
 /**
  * Processes the VLESS protocol header from a Uint8Array.
  * Parses version, user ID, command, address, port, and payload from the VLESS header.
- * 
+ *
  * @param {Uint8Array} chunk - The initial data chunk from the client containing the VLESS header.
  * @returns {{vlessVersion: Uint8Array, userID: Uint8Array, protocol: string, address: string, port: number, payload: Uint8Array}}
  *          Parsed VLESS header components.
@@ -84,7 +84,7 @@ export function processVlessHeader(chunk) {
   // === Parse Command (1 byte) ===
   const command = chunk[offset++];
   const protocol = command === VLESS.COMMAND.TCP ? 'TCP' : command === VLESS.COMMAND.UDP ? 'UDP' : null;
-  
+
   if (!protocol) {
     throw new Error(`Unsupported VLESS command: ${command}`);
   }
@@ -109,13 +109,13 @@ export function processVlessHeader(chunk) {
   // === Extract Remaining Payload ===
   const payload = chunk.subarray(offset);
 
-  return { 
-    vlessVersion, 
-    userID, 
-    protocol, 
-    address: address.value, 
-    port, 
-    payload 
+  return {
+    vlessVersion,
+    userID,
+    protocol,
+    address: address.value,
+    port,
+    payload,
   };
 }
 
@@ -124,7 +124,7 @@ export function processVlessHeader(chunk) {
 /**
  * Reads the VLESS header, validates the user, and dispatches to the correct protocol handler.
  * This is the main connection processing pipeline.
- * 
+ *
  * @param {WebSocket} serverWebSocket - The server-side of the WebSocketPair.
  * @param {Request} request - The original incoming request.
  * @param {object} config - The request-scoped configuration.
@@ -180,14 +180,14 @@ async function processVlessConnection(serverWebSocket, request, config) {
     logger.debug('VLESS:TCP_PROXY', 'Dispatching to TCP proxy handler');
     await handleTcpProxy(serverWebSocket, payload, wsStream, address, port, config);
   }
-  
+
   logger.info('VLESS:PROXY_COMPLETE', `${protocol} proxy completed successfully`);
 }
 
 /**
  * Parses the address field from the VLESS header based on address type.
  * Supports IPv4, IPv6, and FQDN (Fully Qualified Domain Name).
- * 
+ *
  * @param {Uint8Array} chunk - The data chunk containing the address.
  * @param {DataView} view - DataView for reading multi-byte values.
  * @param {number} addressType - The type of address (1=IPv4, 2=FQDN, 3=IPv6).
@@ -210,7 +210,7 @@ function parseAddress(chunk, view, addressType, offset) {
         throw new Error('Insufficient data for FQDN length');
       }
       const domainLength = chunk[offset++];
-      
+
       if (offset + domainLength > chunk.byteLength) {
         throw new Error('Insufficient data for FQDN');
       }
@@ -223,7 +223,11 @@ function parseAddress(chunk, view, addressType, offset) {
         throw new Error('Insufficient data for IPv6 address');
       }
       // Build IPv6 address string directly
-      const address = `[${view.getUint16(offset).toString(16)}:${view.getUint16(offset + 2).toString(16)}:${view.getUint16(offset + 4).toString(16)}:${view.getUint16(offset + 6).toString(16)}:${view.getUint16(offset + 8).toString(16)}:${view.getUint16(offset + 10).toString(16)}:${view.getUint16(offset + 12).toString(16)}:${view.getUint16(offset + 14).toString(16)}]`;
+      const address = `[${view.getUint16(offset).toString(16)}:${view.getUint16(offset + 2).toString(16)}:${view
+        .getUint16(offset + 4)
+        .toString(16)}:${view.getUint16(offset + 6).toString(16)}:${view.getUint16(offset + 8).toString(16)}:${view
+        .getUint16(offset + 10)
+        .toString(16)}:${view.getUint16(offset + 12).toString(16)}:${view.getUint16(offset + 14).toString(16)}]`;
       return { value: address, newOffset: offset + 16 };
     }
 

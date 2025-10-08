@@ -1,5 +1,4 @@
 name = "lesspass"
-# The main entrypoint for deployments is now the obfuscated file in the dist/ directory.
 main = "dist/index.js"
 compatibility_date = "2025-08-29"
 

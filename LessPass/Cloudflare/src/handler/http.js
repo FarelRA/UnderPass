@@ -18,24 +18,25 @@ const MASQUERADE_RESPONSE = `<!DOCTYPE html><html><head><title>404 Not Found</ti
 /**
  * Main HTTP request handler.
  * Routes requests to the /info endpoint for diagnostics, or returns a masquerading 404 page.
- * 
+ *
  * @param {Request} request - The incoming HTTP request.
+ * @param {object} env - Environment variables from Cloudflare Workers runtime.
  * @param {object} config - The request-scoped configuration.
  * @returns {Promise<Response>} The HTTP response.
  */
-export async function handleHttpRequest(request, config) {
+export async function handleHttpRequest(request, env, config) {
   const url = new URL(request.url);
 
   // Route to info endpoint if requested
   if (url.pathname.endsWith('/info')) {
-    return handleInfoRequest(request, config);
+    return handleInfoRequest(request, env, config);
   }
 
   // Return masquerade 404 for all other paths
   logger.info('MASQUERADE', 'Returning 404 Not Found.');
-  return new Response(MASQUERADE_RESPONSE, { 
-    status: 404, 
-    headers: { 'Content-Type': 'text/html' } 
+  return new Response(MASQUERADE_RESPONSE, {
+    status: 404,
+    headers: { 'Content-Type': 'text/html' },
   });
 }
 
@@ -45,16 +46,17 @@ export async function handleHttpRequest(request, config) {
  * Handles requests to the "/info" endpoint.
  * Provides diagnostic information about the request and configuration.
  * Requires Basic Authentication using the configured password.
- * 
+ *
  * @param {Request} request - The incoming HTTP request.
+ * @param {object} env - Environment variables from Cloudflare Workers runtime.
  * @param {object} config - The request-scoped configuration.
  * @returns {Response} JSON response with diagnostic information or 401 Unauthorized.
  */
-function handleInfoRequest(request, config) {
+function handleInfoRequest(request, env, config) {
   // === Authenticate Request ===
   const authHeader = request.headers.get('Authorization');
   const expectedAuth = `Basic ${btoa(':' + config.PASSWORD)}`;
-  
+
   if (authHeader !== expectedAuth) {
     logger.warn('HTTP:AUTH_FAIL', 'Unauthorized access attempt to /info.');
     return new Response('Unauthorized', {
@@ -70,8 +72,9 @@ function handleInfoRequest(request, config) {
       method: request.method,
       url: request.url,
       headers: Object.fromEntries(request.headers.entries()),
-      cf: request.cf,  // Cloudflare-specific request properties
+      cf: request.cf, // Cloudflare-specific request properties
     },
+    env,
     config,
   };
 

@@ -13,7 +13,7 @@ import { safeCloseWebSocket } from '../lib/utils.js';
  * Main handler for TCP proxying with automatic retry mechanism.
  * Attempts a primary connection to the destination, and if it fails or is idle,
  * retries with a relay address as a fallback.
- * 
+ *
  * @param {WebSocket} clientWebSocket - The client-facing WebSocket connection.
  * @param {Uint8Array} initialPayload - The payload from VLESS header parsing to send to remote.
  * @param {ReadableStream} wsStream - The WebSocket message stream (not yet consumed).
@@ -25,7 +25,7 @@ import { safeCloseWebSocket } from '../lib/utils.js';
 export async function handleTcpProxy(clientWebSocket, initialPayload, wsStream, destinationAddress, destinationPort, config) {
   // === Attempt Primary Connection ===
   let connection = await testConnection(destinationAddress, destinationPort, initialPayload);
-  
+
   if (connection) {
     logger.info('TCP_PROXY:PRIMARY_SUCCESS', 'Primary connection established.');
     await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, clientWebSocket);
@@ -43,14 +43,14 @@ export async function handleTcpProxy(clientWebSocket, initialPayload, wsStream, 
   }
 
   logger.info('TCP_PROXY:RETRY_TRIGGER', 'Attempting connection to relay address.');
-  
+
   const [relayAddress, relayPortString] = config.RELAY_ADDR.split(':');
   const relayPort = relayPortString ? parseInt(relayPortString, 10) : destinationPort;
 
   logger.updateLogContext({ remoteAddress: relayAddress, remotePort: relayPort });
 
   connection = await testConnection(relayAddress, relayPort, initialPayload);
-  
+
   if (connection) {
     logger.info('TCP_PROXY:RETRY_SUCCESS', 'Relay connection established.');
     await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, clientWebSocket);
@@ -67,7 +67,7 @@ export async function handleTcpProxy(clientWebSocket, initialPayload, wsStream, 
 /**
  * Tests a TCP connection by sending the initial payload and waiting for a response.
  * This validates that the remote server is responsive before committing to the connection.
- * 
+ *
  * @param {string} hostname - The destination hostname or IP address.
  * @param {number} port - The destination port number.
  * @param {Uint8Array} initialPayload - The initial data to send to the remote server.
@@ -77,7 +77,7 @@ export async function handleTcpProxy(clientWebSocket, initialPayload, wsStream, 
  */
 async function testConnection(hostname, port, initialPayload) {
   logger.info('TCP:TEST', `Testing connection to: ${hostname}:${port}`);
-  
+
   // Establish TCP connection
   const remoteSocket = await connect({ hostname, port });
   const remoteReader = remoteSocket.readable.getReader();
@@ -90,25 +90,25 @@ async function testConnection(hostname, port, initialPayload) {
 
   // Wait for first response to validate connection
   const firstResponse = await remoteReader.read();
-  
+
   if (firstResponse.done) {
     // Connection closed immediately - treat as idle/unresponsive
     remoteReader.releaseLock();
     return null;
   }
 
-  return { 
-    remoteSocket, 
-    remoteReader, 
-    remoteWriter, 
-    firstResponse: firstResponse.value 
+  return {
+    remoteSocket,
+    remoteReader,
+    remoteWriter,
+    firstResponse: firstResponse.value,
   };
 }
 
 /**
  * Proxies bidirectional data between the client WebSocket and remote TCP socket.
  * Sets up two concurrent data pumps: client→remote and remote→client.
- * 
+ *
  * @param {ReadableStreamDefaultReader} remoteReader - Reader for data from remote socket.
  * @param {WritableStreamDefaultWriter} remoteWriter - Writer for data to remote socket.
  * @param {Uint8Array} firstResponse - The first response from remote socket (already read).
@@ -122,15 +122,15 @@ async function proxyConnection(remoteReader, remoteWriter, firstResponse, wsStre
 
   // Set up bidirectional data pumping
   await Promise.all([
-    pump(wsStream.getReader(), remoteWriter),  // Client → Remote
-    pump(remoteReader, clientWebSocket),        // Remote → Client
+    pump(wsStream.getReader(), remoteWriter), // Client → Remote
+    pump(remoteReader, clientWebSocket), // Remote → Client
   ]);
 }
 
 /**
  * Pumps data from a reader to a writer (or WebSocket).
  * Continuously reads from the source and writes to the destination until the stream ends.
- * 
+ *
  * @param {ReadableStreamDefaultReader} reader - The source reader to read data from.
  * @param {WritableStreamDefaultWriter|WebSocket} writer - The destination writer or WebSocket.
  * @returns {Promise<void>}
@@ -138,13 +138,13 @@ async function proxyConnection(remoteReader, remoteWriter, firstResponse, wsStre
  */
 async function pump(reader, writer) {
   const isWebSocket = writer.send !== undefined;
-  
+
   try {
     while (true) {
       const { value, done } = await reader.read();
-      
+
       if (done) break;
-      
+
       // Send data to destination
       if (isWebSocket) {
         writer.send(value);
@@ -152,7 +152,7 @@ async function pump(reader, writer) {
         await writer.write(value);
       }
     }
-    
+
     // Close writer if it's a stream (not WebSocket)
     if (!isWebSocket) {
       await writer.close();
