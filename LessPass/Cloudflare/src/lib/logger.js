@@ -15,15 +15,15 @@ function formatLogMessage(level, section, message, context, optionalParams) {
 export const logger = {
   logLevel: LOG_LEVELS.INFO,
   context: {},
-  
+
   setLogContext(context) {
     this.context = context;
   },
-  
+
   updateLogContext(context) {
     Object.assign(this.context, context);
   },
-  
+
   setLogLevel(level) {
     if (!level) return;
     const upperLevel = String(level).toUpperCase();
@@ -31,31 +31,31 @@ export const logger = {
       this.logLevel = LOG_LEVELS[upperLevel];
     }
   },
-  
+
   debug(section, message, ...optionalParams) {
     if (this.logLevel >= LOG_LEVELS.DEBUG) {
       console.debug(formatLogMessage('DEBUG', section, message, this.context, optionalParams));
     }
   },
-  
+
   info(section, message, ...optionalParams) {
     if (this.logLevel >= LOG_LEVELS.INFO) {
       console.info(formatLogMessage('INFO', section, message, this.context, optionalParams));
     }
   },
-  
+
   warn(section, message, ...optionalParams) {
     if (this.logLevel >= LOG_LEVELS.WARN) {
       console.warn(formatLogMessage('WARN', section, message, this.context, optionalParams));
     }
   },
-  
+
   error(section, message, ...optionalParams) {
     if (this.logLevel >= LOG_LEVELS.ERROR) {
       console.error(formatLogMessage('ERROR', section, message, this.context, optionalParams));
     }
   },
-  
+
   trace(section, message, ...optionalParams) {
     if (this.logLevel >= LOG_LEVELS.TRACE) {
       console.log(formatLogMessage('TRACE', section, message, this.context, optionalParams));
