@@ -7,7 +7,7 @@ import { VLESS } from '../lib/config.js';
 import { logger } from '../lib/logger.js';
 import { handleTcpProxy } from '../protocol/tcp.js';
 import { handleUdpProxy } from '../protocol/udp.js';
-import { initializeWebSocketStream, stringifyUUID } from '../lib/utils.js';
+import { getFirstChunk, createConsumableStream, stringifyUUID } from '../lib/utils.js';
 
 /**
  * Orchestrates an incoming VLESS WebSocket request.
@@ -93,22 +93,12 @@ async function processVlessConnection(server, request, config) {
     throw new Error('Config is null/undefined');
   }
 
-  logger.debug('VLESS:STREAM_INIT', 'Initializing WebSocket stream');
-  let firstChunk, wsStream;
-  try {
-    const result = await initializeWebSocketStream(server, request);
-    firstChunk = result.firstChunk;
-    wsStream = result.wsStream;
-    logger.debug('VLESS:STREAM_READY', `Stream initialized, first chunk: ${firstChunk.byteLength} bytes`);
-  } catch (streamError) {
-    logger.error('VLESS:STREAM_ERROR', `Failed to initialize WebSocket stream: ${streamError.message}`);
-    throw new Error(`Failed to initialize WebSocket stream: ${streamError.message}`);
-  }
+  logger.debug('VLESS:STREAM_INIT', 'Getting first chunk from WebSocket');
+  const firstChunk = await getFirstChunk(server, request);
+  logger.debug('VLESS:FIRST_CHUNK', `Received first chunk: ${firstChunk.byteLength} bytes`);
 
-  if (!firstChunk || firstChunk.byteLength === 0) {
-    logger.error('VLESS:EMPTY_CHUNK', 'First chunk is empty or invalid');
-    throw new Error('First chunk is empty or invalid');
-  }
+  const wsStream = createConsumableStream(server);
+  logger.debug('VLESS:STREAM_READY', 'WebSocket stream created');
 
   logger.debug('VLESS:HEADER_PARSE', 'Parsing VLESS header');
   let vlessVersion, userID, protocol, address, port, payload;

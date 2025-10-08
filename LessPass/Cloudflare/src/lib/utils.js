@@ -7,94 +7,35 @@ import { byteToHex, WS_READY_STATE } from './config.js';
 import { logger } from './logger.js';
 
 /**
- * Gets the first chunk and creates a stream for subsequent messages.
+ * Gets the first chunk from WebSocket, either from early data header or by reading first message.
  * @param {WebSocket} server The server-side WebSocket.
  * @param {Request} request The incoming request.
- * @returns {Promise<{firstChunk: Uint8Array, wsStream: ReadableStream}>} Object containing the first chunk and stream.
- * @throws {Error} If WebSocket or request is invalid, or if stream initialization fails.
+ * @returns {Promise<Uint8Array>} The first data chunk.
+ * @throws {Error} If WebSocket or request is invalid, or if no data is received.
  */
-export async function initializeWebSocketStream(server, request) {
-  logger.trace('UTILS', 'initializeWebSocketStream called');
-
+export async function getFirstChunk(server, request) {
   if (!server) {
-    logger.error('UTILS', 'WebSocket server is null/undefined');
     throw new Error('WebSocket server is required');
   }
-
   if (!request) {
-    logger.error('UTILS', 'Request object is null/undefined');
     throw new Error('Request object is required');
   }
 
+  const earlyDataHeader = request.headers.get('Sec-WebSocket-Protocol');
+  if (earlyDataHeader) {
+    return base64ToUint8Array(earlyDataHeader);
+  }
+
+  const wsStream = createConsumableStream(server);
+  const reader = wsStream.getReader();
   try {
-    const earlyDataHeader = request.headers.get('Sec-WebSocket-Protocol');
-    logger.debug('UTILS', `Early data header present: ${!!earlyDataHeader}`);
-    
-    if (earlyDataHeader) {
-      logger.trace('UTILS', `Early data header length: ${earlyDataHeader.length}`);
-      let firstChunk;
-      try {
-        firstChunk = base64ToUint8Array(earlyDataHeader);
-        logger.debug('UTILS', `Decoded early data: ${firstChunk.byteLength} bytes`);
-      } catch (decodeError) {
-        logger.error('UTILS', `Failed to decode early data: ${decodeError.message}`);
-        throw new Error(`Failed to decode early data: ${decodeError.message}`);
-      }
-
-      let wsStream;
-      try {
-        wsStream = createConsumableStream(server);
-        logger.trace('UTILS', 'WebSocket stream created for early data path');
-      } catch (streamError) {
-        logger.error('UTILS', `Failed to create WebSocket stream: ${streamError.message}`);
-        throw new Error(`Failed to create WebSocket stream: ${streamError.message}`);
-      }
-
-      logger.debug('UTILS', 'Returning early data path result');
-      return { firstChunk, wsStream };
+    const { value, done } = await reader.read();
+    if (done || !value) {
+      throw new Error('WebSocket closed before receiving first chunk');
     }
-
-    logger.debug('UTILS', 'No early data, creating stream and waiting for first message');
-    let wsStream;
-    try {
-      wsStream = createConsumableStream(server);
-      logger.trace('UTILS', 'WebSocket stream created');
-    } catch (streamError) {
-      logger.error('UTILS', `Failed to create WebSocket stream: ${streamError.message}`);
-      throw new Error(`Failed to create WebSocket stream: ${streamError.message}`);
-    }
-
-    const reader = wsStream.getReader();
-    logger.trace('UTILS', 'Got stream reader, waiting for first chunk');
-    let firstChunk;
-    
-    try {
-      const result = await reader.read();
-      logger.trace('UTILS', `Read result: done=${result?.done}, hasValue=${!!result?.value}`);
-      if (!result || result.done) {
-        logger.warn('UTILS', 'WebSocket closed before receiving first chunk');
-        throw new Error('WebSocket closed before receiving first chunk');
-      }
-      firstChunk = result.value;
-      if (!firstChunk || !(firstChunk instanceof Uint8Array)) {
-        logger.error('UTILS', `Invalid first chunk data type: ${typeof firstChunk}`);
-        throw new Error('Invalid first chunk data type');
-      }
-      logger.debug('UTILS', `Received first chunk: ${firstChunk.byteLength} bytes`);
-    } catch (readError) {
-      reader.releaseLock();
-      logger.error('UTILS', `Failed to read first chunk: ${readError.message}`);
-      throw new Error(`Failed to read first chunk: ${readError.message}`);
-    }
-
+    return value;
+  } finally {
     reader.releaseLock();
-    logger.trace('UTILS', 'Reader lock released');
-    
-    logger.debug('UTILS', 'Returning standard path result');
-    return { firstChunk, wsStream };
-  } catch (error) {
-    logger.error('UTILS', `initializeWebSocketStream failed: ${error.message}`);
-    throw new Error(`initializeWebSocketStream failed: ${error.message}`);
   }
 }
 
