@@ -11,6 +11,7 @@ import { getFirstChunk, createConsumableStream, stringifyUUID } from '../lib/uti
 
 // === Module-Level Constants ===
 const textDecoder = new TextDecoder();
+const vlessResponse = new Uint8Array([0, 0]);
 
 // === Public API ===
 
@@ -164,7 +165,7 @@ async function processVlessConnection(serverWebSocket, request, config) {
   logger.info('VLESS:CONNECTION', `Processing ${protocol} request for ${address}:${port}`);
 
   // === Step 6: Send VLESS Handshake Response ===
-  serverWebSocket.send(new Uint8Array([vlessVersion[0], 0]));
+  serverWebSocket.send(vlessResponse);
 
   // === Step 7: Dispatch to Protocol Handler ===
   if (protocol === 'UDP') {
