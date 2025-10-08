@@ -13,7 +13,6 @@ const MASQUERADE_RESPONSE = `<!DOCTYPE html><html><head><title>404 Not Found</ti
  * @param {Request} request The incoming request.
  * @param {object} env The environment variables.
  * @param {object} config The request-scoped configuration.
- * @param {object} logContext Logging context.
  * @returns {Promise<Response>}
  */
 export async function handleHttpRequest(request, env, config) {
@@ -60,7 +59,6 @@ export async function handleHttpRequest(request, env, config) {
  * Requires Basic Authentication using the configured password.
  * @param {Request} request The incoming request.
  * @param {object} config The request-scoped configuration.
- * @param {object} logContext Logging context.
  * @returns {Response}
  */
 function handleInfoRequest(request, config) {

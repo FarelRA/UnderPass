@@ -10,7 +10,8 @@ import { logger } from './logger.js';
  * Gets the first chunk and creates a stream for subsequent messages.
  * @param {WebSocket} server The server-side WebSocket.
  * @param {Request} request The incoming request.
- * @returns {Promise<{firstChunk: Uint8Array, wsStream: ReadableStream}>}
+ * @returns {Promise<{firstChunk: Uint8Array, wsStream: ReadableStream}>} Object containing the first chunk and stream.
+ * @throws {Error} If WebSocket or request is invalid, or if stream initialization fails.
  */
 export async function initializeWebSocketStream(server, request) {
   logger.trace('UTILS', 'initializeWebSocketStream called');
@@ -100,7 +101,8 @@ export async function initializeWebSocketStream(server, request) {
 /**
  * Creates a ReadableStream from WebSocket messages.
  * @param {WebSocket} server The server-side WebSocket.
- * @returns {ReadableStream}
+ * @returns {ReadableStream} A readable stream of WebSocket messages.
+ * @throws {Error} If WebSocket is invalid or stream creation fails.
  */
 export function createConsumableStream(server) {
   logger.trace('UTILS', 'createConsumableStream called');
@@ -203,7 +205,6 @@ export function base64ToUint8Array(base64Str) {
 /**
  * Safely closes a WebSocket connection.
  * @param {WebSocket} socket The WebSocket to close.
- * @param {object} logContext Logging context.
  */
 export function safeCloseWebSocket(socket) {
   logger.trace('safeCloseWebSocket', 'Attempting to close WebSocket');
@@ -238,8 +239,9 @@ export function safeCloseWebSocket(socket) {
 
 /**
  * Converts a Uint8Array UUID to its string representation.
- * @param {Uint8Array} arr
- * @returns {string}
+ * @param {Uint8Array} arr The 16-byte UUID array.
+ * @returns {string} The UUID string in format xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx.
+ * @throws {Error} If the array is not a Uint8Array or not 16 bytes.
  */
 export function stringifyUUID(arr) {
   logger.trace('UTILS', `stringifyUUID called with array length: ${arr?.length}`);

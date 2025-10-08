@@ -13,7 +13,6 @@ import { initializeWebSocketStream, stringifyUUID } from '../lib/utils.js';
  * Orchestrates an incoming VLESS WebSocket request.
  * @param {Request} request The original incoming request.
  * @param {object} config The request-scoped configuration.
- * @param {object} logContext The logging context.
  * @returns {Response} A 101 Switching Protocols response.
  */
 export function handleVlessRequest(request, config) {
@@ -73,6 +72,8 @@ export function handleVlessRequest(request, config) {
  * @param {WebSocket} server The server-side of the WebSocketPair.
  * @param {Request} request The original incoming request.
  * @param {object} config The request-scoped configuration.
+ * @returns {Promise<void>}
+ * @throws {Error} If parameters are invalid, authentication fails, or protocol handling fails.
  */
 async function processVlessConnection(server, request, config) {
   logger.trace('VLESS:PROCESS', 'processVlessConnection started');
