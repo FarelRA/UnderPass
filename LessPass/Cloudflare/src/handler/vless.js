@@ -103,10 +103,10 @@ export function processVlessHeader(chunk) {
   const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
   let offset = 0;
 
-  const vlessVersion = chunk.slice(offset, VLESS.VERSION_LENGTH);
+  const vlessVersion = chunk.subarray(offset, VLESS.VERSION_LENGTH);
   offset += VLESS.VERSION_LENGTH;
 
-  const userID = chunk.slice(offset, offset + VLESS.USERID_LENGTH);
+  const userID = chunk.subarray(offset, offset + VLESS.USERID_LENGTH);
   offset += VLESS.USERID_LENGTH;
 
   const addonLength = chunk[offset];
