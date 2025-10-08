@@ -32,30 +32,8 @@ export async function handleUdpProxy(webSocket, initialPayload, wsStream, config
  * @returns {Promise<void>}
  */
 async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config) {
-  const processChunk = async (chunk) => {
-    const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-
-    for (let offset = 0; offset < chunk.byteLength; ) {
-      if (offset + 2 > chunk.byteLength) {
-        logger.warn('UDP:PARSE', 'Incomplete length header in VLESS UDP chunk.');
-        break;
-      }
-
-      const length = view.getUint16(offset);
-      offset += 2;
-      
-      if (offset + length > chunk.byteLength) {
-        logger.warn('UDP:PARSE', 'Incomplete VLESS UDP packet payload.');
-        break;
-      }
-
-      await processDnsPacket(chunk.subarray(offset, offset + length), webSocket, config);
-      offset += length;
-    }
-  };
-
   if (initialPayload.byteLength > 0) {
-    await processChunk(initialPayload);
+    await processChunk(initialPayload, webSocket, config);
   }
 
   const reader = wsStream.getReader();
@@ -67,10 +45,39 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config) {
         logger.info('UDP:CLOSE', 'Client UDP stream closed.');
         break;
       }
-      await processChunk(value);
+      await processChunk(value, webSocket, config);
     }
   } finally {
     reader.releaseLock();
+  }
+}
+
+/**
+ * Processes a single UDP chunk containing one or more DNS packets.
+ * @param {Uint8Array} chunk The chunk data to process.
+ * @param {WebSocket} webSocket The client WebSocket.
+ * @param {object} config The request-scoped configuration.
+ * @returns {Promise<void>}
+ */
+async function processChunk(chunk, webSocket, config) {
+  const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+
+  for (let offset = 0; offset < chunk.byteLength; ) {
+    if (offset + 2 > chunk.byteLength) {
+      logger.warn('UDP:PARSE', 'Incomplete length header in VLESS UDP chunk.');
+      break;
+    }
+
+    const length = view.getUint16(offset);
+    offset += 2;
+    
+    if (offset + length > chunk.byteLength) {
+      logger.warn('UDP:PARSE', 'Incomplete VLESS UDP packet payload.');
+      break;
+    }
+
+    await processDnsPacket(chunk.subarray(offset, offset + length), webSocket, config);
+    offset += length;
   }
 }
 
