@@ -5,16 +5,12 @@
 
 export const LOG_LEVELS = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, TRACE: 4 };
 
-function formatLogMessage(level, section, message, context, ...optionalParams) {
-  try {
-    const timestamp = new Date().toISOString();
-    const { logId = 'N/A', clientIP = 'N/A', remoteAddress, remotePort } = context;
-    const remote = remoteAddress && remotePort ? `[Remote: ${remoteAddress}:${remotePort}] ` : '';
-    const optionalData = optionalParams.length > 0 ? ` ${JSON.stringify(optionalParams)}` : '';
-    return `[${timestamp}] [${level}] [${logId}] [${section}] [Client: ${clientIP}] ${remote}${message}${optionalData}`;
-  } catch (error) {
-    return `[LOGGER] Failed to format log message: ${error.message}`;
-  }
+function formatLogMessage(level, section, message, context, optionalParams) {
+  const timestamp = new Date().toISOString();
+  const { logId = 'N/A', clientIP = 'N/A', remoteAddress, remotePort } = context;
+  const remote = remoteAddress && remotePort ? `[Remote: ${remoteAddress}:${remotePort}] ` : '';
+  const optional = optionalParams.length ? ` ${optionalParams.join(' ')}` : '';
+  return `[${timestamp}] [${level}] [${logId}] [${section}] [Client: ${clientIP}] ${remote}${message}${optional}`;
 }
 
 export const logger = {
@@ -22,77 +18,48 @@ export const logger = {
   context: {},
   
   setLogContext(context) {
-    this.context = { ...context };
+    this.context = context;
   },
   
   updateLogContext(context) {
-    this.context = { ...this.context, ...context };
+    Object.assign(this.context, context);
   },
   
   setLogLevel(level) {
-    try {
-      if (!level) {
-        console.warn('[LOGGER] setLogLevel called with null/undefined level');
-        return;
-      }
-      const upperLevel = String(level).toUpperCase();
-      if (upperLevel in LOG_LEVELS) {
-        this.logLevel = LOG_LEVELS[upperLevel];
-      } else {
-        console.warn(`[LOGGER] Invalid log level: ${level}`);
-      }
-    } catch (error) {
-      console.error(`[LOGGER] setLogLevel error: ${error.message}`);
+    if (!level) return;
+    const upperLevel = String(level).toUpperCase();
+    if (upperLevel in LOG_LEVELS) {
+      this.logLevel = LOG_LEVELS[upperLevel];
     }
   },
   
   debug(section, message, ...optionalParams) {
-    try {
-      if (this.logLevel >= LOG_LEVELS.DEBUG) {
-        console.debug(formatLogMessage('DEBUG', section, message, { ...this.context }, ...optionalParams));
-      }
-    } catch (error) {
-      console.error(`[LOGGER] debug error: ${error.message}`);
+    if (this.logLevel >= LOG_LEVELS.DEBUG) {
+      console.debug(formatLogMessage('DEBUG', section, message, this.context, optionalParams));
     }
   },
   
   info(section, message, ...optionalParams) {
-    try {
-      if (this.logLevel >= LOG_LEVELS.INFO) {
-        console.info(formatLogMessage('INFO', section, message, { ...this.context }, ...optionalParams));
-      }
-    } catch (error) {
-      console.error(`[LOGGER] info error: ${error.message}`);
+    if (this.logLevel >= LOG_LEVELS.INFO) {
+      console.info(formatLogMessage('INFO', section, message, this.context, optionalParams));
     }
   },
   
   warn(section, message, ...optionalParams) {
-    try {
-      if (this.logLevel >= LOG_LEVELS.WARN) {
-        console.warn(formatLogMessage('WARN', section, message, { ...this.context }, ...optionalParams));
-      }
-    } catch (error) {
-      console.error(`[LOGGER] warn error: ${error.message}`);
+    if (this.logLevel >= LOG_LEVELS.WARN) {
+      console.warn(formatLogMessage('WARN', section, message, this.context, optionalParams));
     }
   },
   
   error(section, message, ...optionalParams) {
-    try {
-      if (this.logLevel >= LOG_LEVELS.ERROR) {
-        console.error(formatLogMessage('ERROR', section, message, { ...this.context }, ...optionalParams));
-      }
-    } catch (error) {
-      console.error(`[LOGGER] error logging failed: ${error.message}`);
+    if (this.logLevel >= LOG_LEVELS.ERROR) {
+      console.error(formatLogMessage('ERROR', section, message, this.context, optionalParams));
     }
   },
   
   trace(section, message, ...optionalParams) {
-    try {
-      if (this.logLevel >= LOG_LEVELS.TRACE) {
-        console.log(formatLogMessage('TRACE', section, message, { ...this.context }, ...optionalParams));
-      }
-    } catch (error) {
-      console.error(`[LOGGER] trace error: ${error.message}`);
+    if (this.logLevel >= LOG_LEVELS.TRACE) {
+      console.log(formatLogMessage('TRACE', section, message, this.context, optionalParams));
     }
   },
 };
@@ -102,10 +69,5 @@ export const logger = {
  * @returns {string} A 6-character uppercase base-36 log ID.
  */
 export function generateLogId() {
-  try {
-    return Math.random().toString(36).substring(2, 8).toUpperCase();
-  } catch (error) {
-    console.error(`[LOGGER] generateLogId error: ${error.message}`);
-    throw new Error(`Failed to generate log ID: ${error.message}`);
-  }
+  return Math.random().toString(36).substring(2, 8).toUpperCase();
 }
