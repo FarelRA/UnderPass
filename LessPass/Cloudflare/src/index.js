@@ -35,7 +35,6 @@ export default {
 
     // === Route Based on Request Type ===
     const upgradeHeader = request.headers.get('Upgrade');
-
     if (upgradeHeader === 'websocket') {
       logger.info('WORKER:ROUTE', 'Routing WebSocket request to VLESS handler');
       return handleVlessRequest(request, config);

@@ -90,10 +90,8 @@ async function testConnection(hostname, port, initialPayload) {
 
   // Wait for first response to validate connection
   const firstResponse = await remoteReader.read();
-
   if (firstResponse.done) {
-    // Connection closed immediately - treat as idle/unresponsive
-    remoteReader.releaseLock();
+    // Connection closed immediately
     return null;
   }
 
