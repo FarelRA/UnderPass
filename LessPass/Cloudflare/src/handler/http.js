@@ -5,34 +5,53 @@
 
 import { logger } from '../lib/logger.js';
 
-const MASQUERADE_RESPONSE = `<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>`;
+// === Constants ===
 
 /**
- * Main HTTP request handler. Routes to the info endpoint or returns a
- * masquerading 404 page for all other paths.
- * @param {Request} request The incoming request.
- * @param {object} config The request-scoped configuration.
- * @returns {Promise<Response>}
+ * Masquerade response to mimic nginx 404 page.
+ * Used to hide the true nature of the service from casual probing.
+ */
+const MASQUERADE_RESPONSE = `<!DOCTYPE html><html><head><title>404 Not Found</title></head><body><center><h1>404 Not Found</h1></center><hr><center>nginx</center></body></html>`;
+
+// === Public API ===
+
+/**
+ * Main HTTP request handler.
+ * Routes requests to the /info endpoint for diagnostics, or returns a masquerading 404 page.
+ * 
+ * @param {Request} request - The incoming HTTP request.
+ * @param {object} config - The request-scoped configuration.
+ * @returns {Promise<Response>} The HTTP response.
  */
 export async function handleHttpRequest(request, config) {
   const url = new URL(request.url);
 
+  // Route to info endpoint if requested
   if (url.pathname.endsWith('/info')) {
     return handleInfoRequest(request, config);
   }
 
+  // Return masquerade 404 for all other paths
   logger.info('MASQUERADE', 'Returning 404 Not Found.');
-  return new Response(MASQUERADE_RESPONSE, { status: 404, headers: { 'Content-Type': 'text/html' } });
+  return new Response(MASQUERADE_RESPONSE, { 
+    status: 404, 
+    headers: { 'Content-Type': 'text/html' } 
+  });
 }
 
+// === Private Helper Functions ===
+
 /**
- * Handles requests to the "/info" endpoint, providing diagnostic information.
+ * Handles requests to the "/info" endpoint.
+ * Provides diagnostic information about the request and configuration.
  * Requires Basic Authentication using the configured password.
- * @param {Request} request The incoming request.
- * @param {object} config The request-scoped configuration.
- * @returns {Response}
+ * 
+ * @param {Request} request - The incoming HTTP request.
+ * @param {object} config - The request-scoped configuration.
+ * @returns {Response} JSON response with diagnostic information or 401 Unauthorized.
  */
 function handleInfoRequest(request, config) {
+  // === Authenticate Request ===
   const authHeader = request.headers.get('Authorization');
   const expectedAuth = `Basic ${btoa(':' + config.PASSWORD)}`;
   
@@ -44,18 +63,20 @@ function handleInfoRequest(request, config) {
     });
   }
 
-  const info = {
+  // === Build Diagnostic Information ===
+  const diagnosticInfo = {
     status: 'OK',
     request: {
       method: request.method,
       url: request.url,
       headers: Object.fromEntries(request.headers.entries()),
-      cf: request.cf,
+      cf: request.cf,  // Cloudflare-specific request properties
     },
     config,
   };
 
-  return new Response(JSON.stringify(info, null, 2), {
+  // === Return JSON Response ===
+  return new Response(JSON.stringify(diagnosticInfo, null, 2), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });
