@@ -34,7 +34,7 @@ export async function handleUdpProxy(clientWebSocket, initialPayload, wsStream, 
       const { value, done } = await reader.read();
 
       if (done) {
-        logger.info('UDP:CLOSE', 'Client UDP stream closed.');
+        logger.info('UDP:STREAM', 'Client stream closed');
         break;
       }
 
@@ -67,7 +67,7 @@ async function processChunk(chunk, clientWebSocket, config) {
   while (offset < chunk.byteLength) {
     // === Read Packet Length (2 bytes) ===
     if (offset + 2 > chunk.byteLength) {
-      logger.warn('UDP:PARSE', 'Incomplete length header in VLESS UDP chunk.');
+      logger.warn('UDP:PARSE', 'Incomplete length header in chunk');
       break;
     }
 
@@ -76,7 +76,7 @@ async function processChunk(chunk, clientWebSocket, config) {
 
     // === Validate Packet Data ===
     if (offset + packetLength > chunk.byteLength) {
-      logger.warn('UDP:PARSE', 'Incomplete VLESS UDP packet payload.');
+      logger.warn('UDP:PARSE', 'Incomplete packet payload in chunk');
       break;
     }
 
@@ -106,7 +106,7 @@ async function processDnsPacket(dnsQuery, clientWebSocket, config) {
   });
 
   if (!response.ok) {
-    logger.error('UDP:DOH:ERROR', `DoH request failed with status ${response.status}`);
+    logger.error('UDP:DOH', `DoH request failed with status ${response.status}`);
     return;
   }
 
@@ -115,7 +115,7 @@ async function processDnsPacket(dnsQuery, clientWebSocket, config) {
   const resultSize = dnsResult.byteLength;
 
   if (resultSize === 0) {
-    logger.warn('UDP:EMPTY:RESPONSE', 'DoH returned empty response');
+    logger.warn('UDP:DOH', 'DoH returned empty response');
     return;
   }
 

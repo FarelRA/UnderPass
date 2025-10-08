@@ -33,7 +33,7 @@ export async function handleHttpRequest(request, env, config) {
   }
 
   // Return masquerade 404 for all other paths
-  logger.info('MASQUERADE', 'Returning 404 Not Found.');
+  logger.info('HTTP:MASQUERADE', 'Returning 404 Not Found page');
   return new Response(MASQUERADE_RESPONSE, {
     status: 404,
     headers: { 'Content-Type': 'text/html' },
@@ -58,7 +58,7 @@ function handleInfoRequest(request, env, config) {
   const expectedAuth = `Basic ${btoa(':' + config.PASSWORD)}`;
 
   if (authHeader !== expectedAuth) {
-    logger.warn('HTTP:AUTH:FAIL', 'Unauthorized access attempt to /info.');
+    logger.warn('HTTP:AUTH', 'Unauthorized access attempt to /info endpoint');
     return new Response('Unauthorized', {
       status: 401,
       headers: { 'WWW-Authenticate': 'Basic realm="VLESS Worker Info"' },
