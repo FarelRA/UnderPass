@@ -6,11 +6,10 @@
 export const LOG_LEVELS = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, TRACE: 4 };
 
 function formatLogMessage(level, section, message, context, optionalParams) {
-  const timestamp = new Date().toISOString();
   const { logId = 'N/A', clientIP = 'N/A', remoteAddress, remotePort } = context;
   const remote = remoteAddress && remotePort ? `[Remote: ${remoteAddress}:${remotePort}] ` : '';
   const optional = optionalParams.length ? ` ${optionalParams.join(' ')}` : '';
-  return `[${timestamp}] [${level}] [${logId}] [${section}] [Client: ${clientIP}] ${remote}${message}${optional}`;
+  return `[${level}] [${logId}] [${section}] [Client: ${clientIP}] ${remote}${message}${optional}`;
 }
 
 export const logger = {
