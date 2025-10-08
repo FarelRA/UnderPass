@@ -38,9 +38,7 @@ export function handleVlessRequest(request, config) {
   logger.info('VLESS:PROCESS', 'Starting VLESS connection processing');
   processVlessConnection(serverWebSocket, request, config).catch((err) => {
     logger.error('VLESS:PROCESS', `Connection setup failed: ${err.message}`);
-    try {
-      serverWebSocket.close(1011, `SETUP_ERROR: ${err.message}`);
-    } catch {}
+    serverWebSocket.close(1011, `SETUP_ERROR: ${err.message}`);
   });
 
   logger.debug('VLESS:HANDLER', 'Returning 101 Switching Protocols response');
