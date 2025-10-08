@@ -58,7 +58,7 @@ function handleInfoRequest(request, env, config) {
   const expectedAuth = `Basic ${btoa(':' + config.PASSWORD)}`;
 
   if (authHeader !== expectedAuth) {
-    logger.warn('HTTP:AUTH_FAIL', 'Unauthorized access attempt to /info.');
+    logger.warn('HTTP:AUTH:FAIL', 'Unauthorized access attempt to /info.');
     return new Response('Unauthorized', {
       status: 401,
       headers: { 'WWW-Authenticate': 'Basic realm="VLESS Worker Info"' },

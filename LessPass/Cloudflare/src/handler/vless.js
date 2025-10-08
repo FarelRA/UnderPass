@@ -32,12 +32,12 @@ export function handleVlessRequest(request, config) {
   const serverWebSocket = pair[1];
 
   serverWebSocket.accept();
-  logger.debug('VLESS:WS_ACCEPT', 'WebSocket accepted');
+  logger.debug('VLESS:WS:ACCEPT', 'WebSocket accepted');
 
   // Process VLESS connection asynchronously
   logger.info('VLESS:PROCESSING', 'Starting VLESS connection processing');
   processVlessConnection(serverWebSocket, request, config).catch((err) => {
-    logger.error('VLESS:CONNECTION_SETUP_ERROR', `Failed to process VLESS connection: ${err.message}`);
+    logger.error('VLESS:CONNECTION:SETUP:ERROR', `Failed to process VLESS connection: ${err.message}`);
     try {
       serverWebSocket.close(1011, `SETUP_ERROR: ${err.message}`);
     } catch {}
@@ -135,30 +135,30 @@ async function processVlessConnection(serverWebSocket, request, config) {
   logger.trace('VLESS:PROCESS', 'processVlessConnection started');
 
   // === Step 1: Get First Data Chunk ===
-  logger.debug('VLESS:STREAM_INIT', 'Getting first chunk from WebSocket');
+  logger.debug('VLESS:STREAM:INIT', 'Getting first chunk from WebSocket');
   const firstChunk = await getFirstChunk(serverWebSocket, request);
-  logger.debug('VLESS:FIRST_CHUNK', `Received first chunk: ${firstChunk.byteLength} bytes`);
+  logger.debug('VLESS:FIRST:CHUNK', `Received first chunk: ${firstChunk.byteLength} bytes`);
 
   // === Step 2: Create Stream for Subsequent Data ===
   const wsStream = createConsumableStream(serverWebSocket);
-  logger.debug('VLESS:STREAM_READY', 'WebSocket stream created');
+  logger.debug('VLESS:STREAM:READY', 'WebSocket stream created');
 
   // === Step 3: Parse VLESS Header ===
-  logger.debug('VLESS:HEADER_PARSE', 'Parsing VLESS header');
+  logger.debug('VLESS:HEADER:PARSE', 'Parsing VLESS header');
   const { vlessVersion, userID, protocol, address, port, payload } = processVlessHeader(firstChunk);
-  logger.debug('VLESS:HEADER_PARSED', `Protocol: ${protocol}, Address: ${address}:${port}, Payload: ${payload.byteLength} bytes`);
+  logger.debug('VLESS:HEADER:PARSED', `Protocol: ${protocol}, Address: ${address}:${port}, Payload: ${payload.byteLength} bytes`);
 
   // === Step 4: Authenticate User ===
-  logger.trace('VLESS:UUID_STRINGIFY', 'Converting user ID to string');
+  logger.trace('VLESS:UUID:STRINGIFY', 'Converting user ID to string');
   const userIDString = stringifyUUID(userID);
-  logger.trace('VLESS:UUID_RESULT', `User ID: ${userIDString}`);
+  logger.trace('VLESS:UUID:RESULT', `User ID: ${userIDString}`);
 
   if (userIDString !== config.USER_ID) {
-    logger.warn('VLESS:AUTH_FAIL', `Invalid user ID. Expected: ${config.USER_ID}, Got: ${userIDString}`);
+    logger.warn('VLESS:AUTH:FAIL', `Invalid user ID. Expected: ${config.USER_ID}, Got: ${userIDString}`);
     throw new Error(`Invalid user ID. Expected: ${config.USER_ID}, Got: ${userIDString}`);
   }
 
-  logger.info('VLESS:AUTH_SUCCESS', `User authenticated: ${userIDString}`);
+  logger.info('VLESS:AUTH:SUCCESS', `User authenticated: ${userIDString}`);
 
   // === Step 5: Update Logging Context ===
   logger.updateLogContext({ remoteAddress: address, remotePort: port });
@@ -171,17 +171,17 @@ async function processVlessConnection(serverWebSocket, request, config) {
   if (protocol === 'UDP') {
     // UDP only supports DNS (port 53)
     if (port !== 53) {
-      logger.error('VLESS:INVALID_UDP_PORT', `UDP is only supported for DNS on port 53, got port ${port}`);
+      logger.error('VLESS:INVALID:UDP:PORT', `UDP is only supported for DNS on port 53, got port ${port}`);
       throw new Error(`UDP is only supported for DNS on port 53, got port ${port}`);
     }
-    logger.debug('VLESS:UDP_PROXY', 'Dispatching to UDP proxy handler');
+    logger.debug('VLESS:UDP:PROXY', 'Dispatching to UDP proxy handler');
     await handleUdpProxy(serverWebSocket, payload, wsStream, config);
   } else {
-    logger.debug('VLESS:TCP_PROXY', 'Dispatching to TCP proxy handler');
+    logger.debug('VLESS:TCP:PROXY', 'Dispatching to TCP proxy handler');
     await handleTcpProxy(serverWebSocket, payload, wsStream, address, port, config);
   }
 
-  logger.info('VLESS:PROXY_COMPLETE', `${protocol} proxy completed successfully`);
+  logger.info('VLESS:PROXY:COMPLETE', `${protocol} proxy completed successfully`);
 }
 
 /**
