@@ -26,7 +26,8 @@ export const logger = {
   },
   
   setLogLevel(level) {
-    const upperLevel = level.toUpperCase();
+    if (!level) return;
+    const upperLevel = String(level).toUpperCase();
     if (upperLevel in LOG_LEVELS) {
       this.logLevel = LOG_LEVELS[upperLevel];
     }

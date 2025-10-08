@@ -20,19 +20,24 @@ export const VLESS_RESPONSE = new Uint8Array([0, 0]);
  * @returns {Response} A 101 Switching Protocols response.
  */
 export function handleVlessRequest(request, config) {
+  logger.trace('VLESS:ENTRY', 'handleVlessRequest called');
+
   const pair = new WebSocketPair();
   const client = pair[0];
   const server = pair[1];
   
   server.accept();
+  logger.debug('VLESS:WS_ACCEPT', 'WebSocket accepted');
 
+  logger.info('VLESS:PROCESSING', 'Starting VLESS connection processing');
   processVlessConnection(server, request, config).catch((err) => {
-    logger.error('VLESS:ERROR', err.message);
+    logger.error('VLESS:CONNECTION_SETUP_ERROR', `Failed to process VLESS connection: ${err.message}`);
     try {
-      server.close(1011, `ERROR: ${err.message}`);
+      server.close(1011, `SETUP_ERROR: ${err.message}`);
     } catch {}
   });
 
+  logger.debug('VLESS:RESPONSE', 'Returning 101 Switching Protocols');
   return new Response(null, { status: 101, webSocket: client });
 }
 
@@ -45,29 +50,47 @@ export function handleVlessRequest(request, config) {
  * @throws {Error} If parameters are invalid, authentication fails, or protocol handling fails.
  */
 async function processVlessConnection(server, request, config) {
-  const firstChunk = await getFirstChunk(server, request);
-  const wsStream = createConsumableStream(server);
-  const { vlessVersion, userID, protocol, address, port, payload } = processVlessHeader(firstChunk);
+  logger.trace('VLESS:PROCESS', 'processVlessConnection started');
 
+  logger.debug('VLESS:STREAM_INIT', 'Getting first chunk from WebSocket');
+  const firstChunk = await getFirstChunk(server, request);
+  logger.debug('VLESS:FIRST_CHUNK', `Received first chunk: ${firstChunk.byteLength} bytes`);
+
+  const wsStream = createConsumableStream(server);
+  logger.debug('VLESS:STREAM_READY', 'WebSocket stream created');
+
+  logger.debug('VLESS:HEADER_PARSE', 'Parsing VLESS header');
+  const { vlessVersion, userID, protocol, address, port, payload } = processVlessHeader(firstChunk);
+  logger.debug('VLESS:HEADER_PARSED', `Protocol: ${protocol}, Address: ${address}:${port}, Payload: ${payload.byteLength} bytes`);
+
+  logger.trace('VLESS:UUID_STRINGIFY', 'Converting user ID to string');
   const userIDString = stringifyUUID(userID);
+  logger.trace('VLESS:UUID_RESULT', `User ID: ${userIDString}`);
 
   if (userIDString !== config.USER_ID) {
-    throw new Error(`Invalid user ID`);
+    logger.warn('VLESS:AUTH_FAIL', `Invalid user ID. Expected: ${config.USER_ID}, Got: ${userIDString}`);
+    throw new Error(`Invalid user ID. Expected: ${config.USER_ID}, Got: ${userIDString}`);
   }
 
+  logger.info('VLESS:AUTH_SUCCESS', `User authenticated: ${userIDString}`);
+
   logger.updateLogContext({ remoteAddress: address, remotePort: port });
-  logger.info('VLESS:CONN', `${protocol} ${address}:${port}`);
+  logger.info('VLESS:CONNECTION', `Processing ${protocol} request for ${address}:${port}`);
 
   server.send(new Uint8Array([vlessVersion[0], 0]));
 
   if (protocol === 'UDP') {
     if (port !== 53) {
-      throw new Error(`UDP only supports port 53`);
+      logger.error('VLESS:INVALID_UDP_PORT', `UDP is only supported for DNS on port 53, got port ${port}`);
+      throw new Error(`UDP is only supported for DNS on port 53, got port ${port}`);
     }
+    logger.debug('VLESS:UDP_PROXY', 'Dispatching to UDP proxy handler');
     await handleUdpProxy(server, payload, wsStream, config);
   } else {
+    logger.debug('VLESS:TCP_PROXY', 'Dispatching to TCP proxy handler');
     await handleTcpProxy(server, payload, wsStream, address, port, config);
   }
+  logger.info('VLESS:PROXY_COMPLETE', `${protocol} proxy completed successfully`);
 }
 
 /**
