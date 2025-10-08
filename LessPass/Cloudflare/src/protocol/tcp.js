@@ -7,6 +7,8 @@ import { connect } from 'cloudflare:sockets';
 import { logger } from '../lib/logger.js';
 import { safeCloseWebSocket } from '../lib/utils.js';
 
+const VLESS_RESPONSE = new Uint8Array([0, 0]);
+
 /**
  * Main handler for TCP proxying. Attempts a primary connection and conditionally
  * retries with a relay address if the primary connection is idle.
@@ -21,27 +23,21 @@ import { safeCloseWebSocket } from '../lib/utils.js';
  * @throws {Error} If parameters are invalid or handshake fails.
  */
 export async function handleTcpProxy(webSocket, initialPayload, wsStream, address, port, vlessVersion, config) {
-  webSocket.send(new Uint8Array([vlessVersion[0], 0]));
+  webSocket.send(VLESS_RESPONSE);
 
-  // --- Primary Connection Attempt ---
   let connection = await testConnection(address, port, initialPayload);
   if (connection) {
-    logger.info('TCP_PROXY:PRIMARY_SUCCESS', 'Primary connection established.');
     await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
     safeCloseWebSocket(webSocket);
     return;
   }
 
-  logger.warn('TCP_PROXY:PRIMARY_IDLE', 'Primary connection closed without data exchange.');
-
-  // --- Retry Logic ---
   if (!config.RELAY_ADDR) {
-    logger.error('TCP_PROXY:NO_RELAY', 'No relay address configured');
-    webSocket.close(1011, 'Connection failed: No relay');
+    logger.error('TCP:NO_RELAY', 'No relay configured');
+    webSocket.close(1011, 'Connection failed');
     return;
   }
 
-  logger.info('TCP_PROXY:RETRY_TRIGGER', 'Attempting connection to relay address.');
   const [relayAddr, relayPortStr] = config.RELAY_ADDR.split(':');
   const relayPort = relayPortStr ? parseInt(relayPortStr, 10) : port;
 
@@ -49,10 +45,9 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
 
   connection = await testConnection(relayAddr, relayPort, initialPayload);
   if (connection) {
-    logger.info('TCP_PROXY:RETRY_SUCCESS', 'Relay connection established.');
     await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
   } else {
-    logger.error('TCP_PROXY:ALL_FAILED', 'Both primary and relay connections failed.');
+    logger.error('TCP:FAILED', 'All connections failed');
     webSocket.close(1011, 'Connection failed');
   }
 
@@ -68,8 +63,6 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
  * @throws {Error} If connection fails or parameters are invalid.
  */
 async function testConnection(host, port, initialPayload) {
-  logger.info('TCP:TEST', `Testing connection to: ${host}:${port}`);
-  
   const remoteSocket = await connect({ hostname: host, port });
   const remoteReader = remoteSocket.readable.getReader();
   const remoteWriter = remoteSocket.writable.getWriter();
@@ -120,9 +113,7 @@ async function pump(reader, writer) {
     while (true) {
       const { value, done } = await reader.read();
       if (done) break;
-      if (value) {
-        isWebSocket ? writer.send(value) : await writer.write(value);
-      }
+      isWebSocket ? writer.send(value) : await writer.write(value);
     }
     if (!isWebSocket) await writer.close();
   } catch (error) {
