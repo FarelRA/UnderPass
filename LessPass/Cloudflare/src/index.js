@@ -20,17 +20,24 @@ export default {
     const clientIP = request.headers.get('CF-Connecting-IP') || 'N/A';
     
     logger.setLogContext({ logId, clientIP });
+    logger.trace('WORKER:ENTRY', 'Worker fetch handler invoked');
 
     const url = new URL(request.url);
+    logger.trace('WORKER:URL_PARSED', `Parsed URL - Host: ${url.host}, Path: ${url.pathname}`);
+
     const config = initializeConfig(url, env);
     logger.setLogLevel(config.LOG_LEVEL);
+    logger.debug('WORKER:LOG_LEVEL_SET', `Log level set to: ${config.LOG_LEVEL}`);
 
-    if (request.headers.get('Upgrade') === 'websocket') {
-      logger.info('WORKER:ROUTING', 'WebSocket request');
+    const upgradeHeader = request.headers.get('Upgrade');
+    logger.trace('WORKER:UPGRADE_HEADER', `Upgrade header: ${upgradeHeader}`);
+
+    if (upgradeHeader === 'websocket') {
+      logger.info('WORKER:ROUTING', 'Handling WebSocket (VLESS) request.');
       return handleVlessRequest(request, config);
     }
     
-    logger.info('WORKER:ROUTING', 'HTTP request');
+    logger.info('WORKER:ROUTING', 'Handling standard HTTP request.');
     return handleHttpRequest(request, config);
   },
 };

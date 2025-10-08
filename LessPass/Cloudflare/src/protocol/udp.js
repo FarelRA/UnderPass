@@ -36,12 +36,18 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config) {
     const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
 
     for (let offset = 0; offset < chunk.byteLength; ) {
-      if (offset + 2 > chunk.byteLength) break;
+      if (offset + 2 > chunk.byteLength) {
+        logger.warn('UDP:PARSE', 'Incomplete length header in VLESS UDP chunk.');
+        break;
+      }
 
       const length = view.getUint16(offset);
       offset += 2;
       
-      if (offset + length > chunk.byteLength) break;
+      if (offset + length > chunk.byteLength) {
+        logger.warn('UDP:PARSE', 'Incomplete VLESS UDP packet payload.');
+        break;
+      }
 
       await processDnsPacket(chunk.subarray(offset, offset + length), webSocket, config);
       offset += length;
@@ -57,7 +63,10 @@ async function proxyUdpOverDoH(webSocket, initialPayload, wsStream, config) {
   try {
     while (true) {
       const { value, done } = await reader.read();
-      if (done) break;
+      if (done) {
+        logger.info('UDP:CLOSE', 'Client UDP stream closed.');
+        break;
+      }
       await processChunk(value);
     }
   } finally {

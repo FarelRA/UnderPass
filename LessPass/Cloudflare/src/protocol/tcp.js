@@ -20,19 +20,25 @@ import { safeCloseWebSocket } from '../lib/utils.js';
  * @throws {Error} If parameters are invalid or handshake fails.
  */
 export async function handleTcpProxy(webSocket, initialPayload, wsStream, address, port, config) {
+  // --- Primary Connection Attempt ---
   let connection = await testConnection(address, port, initialPayload);
   if (connection) {
+    logger.info('TCP_PROXY:PRIMARY_SUCCESS', 'Primary connection established.');
     await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
     safeCloseWebSocket(webSocket);
     return;
   }
 
+  logger.warn('TCP_PROXY:PRIMARY_IDLE', 'Primary connection closed without data exchange.');
+
+  // --- Retry Logic ---
   if (!config.RELAY_ADDR) {
-    logger.error('TCP:NO_RELAY', 'No relay configured');
-    webSocket.close(1011, 'Connection failed');
+    logger.error('TCP_PROXY:NO_RELAY', 'No relay address configured');
+    webSocket.close(1011, 'Connection failed: No relay');
     return;
   }
 
+  logger.info('TCP_PROXY:RETRY_TRIGGER', 'Attempting connection to relay address.');
   const [relayAddr, relayPortStr] = config.RELAY_ADDR.split(':');
   const relayPort = relayPortStr ? parseInt(relayPortStr, 10) : port;
 
@@ -40,9 +46,10 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
 
   connection = await testConnection(relayAddr, relayPort, initialPayload);
   if (connection) {
+    logger.info('TCP_PROXY:RETRY_SUCCESS', 'Relay connection established.');
     await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, webSocket);
   } else {
-    logger.error('TCP:FAILED', 'All connections failed');
+    logger.error('TCP_PROXY:ALL_FAILED', 'Both primary and relay connections failed.');
     webSocket.close(1011, 'Connection failed');
   }
 
@@ -58,6 +65,8 @@ export async function handleTcpProxy(webSocket, initialPayload, wsStream, addres
  * @throws {Error} If connection fails or parameters are invalid.
  */
 async function testConnection(host, port, initialPayload) {
+  logger.info('TCP:TEST', `Testing connection to: ${host}:${port}`);
+  
   const remoteSocket = await connect({ hostname: host, port });
   const remoteReader = remoteSocket.readable.getReader();
   const remoteWriter = remoteSocket.writable.getWriter();
