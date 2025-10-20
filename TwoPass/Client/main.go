@@ -8,6 +8,7 @@ import (
   "flag"
   "io"
   "log"
+  "math/rand"
   "net"
   "net/http"
   "net/url"
@@ -15,7 +16,6 @@ import (
   "sync"
   "time"
 
-  "github.com/google/uuid"
   "github.com/quic-go/quic-go/http3"
   "golang.org/x/net/http2"
 )
@@ -54,6 +54,25 @@ func NewProxy(cfg Config) *Proxy {
   parsedGET, _ := url.Parse(cfg.UpstreamURLGET)
   dialer := &net.Dialer{Timeout: 5 * time.Second}
 
+  // Extract ports from URLs
+  postPort := parsedPOST.Port()
+  if postPort == "" {
+    if parsedPOST.Scheme == "https" {
+      postPort = "443"
+    } else {
+      postPort = "80"
+    }
+  }
+
+  getPort := parsedGET.Port()
+  if getPort == "" {
+    if parsedGET.Scheme == "https" {
+      getPort = "443"
+    } else {
+      getPort = "80"
+    }
+  }
+
   // POST client (HTTP or HTTP/2)
   var transportPOST http.RoundTripper
   if parsedPOST.Scheme == "https" {
@@ -62,7 +81,7 @@ func NewProxy(cfg Config) *Proxy {
       ForceAttemptHTTP2: true,
       DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
         if cfg.UpstreamAddr != "" {
-          addr = cfg.UpstreamAddr
+          addr = net.JoinHostPort(cfg.UpstreamAddr, postPort)
         }
         return dialer.DialContext(ctx, network, addr)
       },
@@ -78,7 +97,7 @@ func NewProxy(cfg Config) *Proxy {
       AllowHTTP: true,
       DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
         if cfg.UpstreamAddr != "" {
-          addr = cfg.UpstreamAddr
+          addr = net.JoinHostPort(cfg.UpstreamAddr, postPort)
         } else {
           addr = parsedPOST.Host
         }
@@ -103,7 +122,7 @@ func NewProxy(cfg Config) *Proxy {
       AllowHTTP: true,
       DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
         if cfg.UpstreamAddr != "" {
-          addr = cfg.UpstreamAddr
+          addr = net.JoinHostPort(cfg.UpstreamAddr, getPort)
         } else {
           addr = parsedGET.Host
         }
@@ -197,13 +216,13 @@ func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
     clientConn.Close()
     return
   }
-  log.Printf("%s [v1] Tunnel established to upstream", logPrefixTunnel)
+  log.Printf("%s [v1] Upstream tunnel established", logPrefixTunnel)
 
   written, err := io.Copy(clientConn, upstreamResp.Body)
-  log.Printf("%s [v1] Upstream -> Client stream copied %d bytes", logPrefixStream, written)
   if err != nil && !isExpectedError(err) {
     log.Printf("%s [v1] Stream error: %v", logPrefixError, err)
   }
+  log.Printf("%s [v1] Upstream -> Client copied %d bytes", logPrefixStream, written)
   clientConn.Close()
 
   log.Printf("%s [v1] Connection closed for %s", logPrefixClose, r.Host)
@@ -237,7 +256,7 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
   ctx, cancel := context.WithCancel(r.Context())
   defer cancel()
 
-  sessionID := uuid.New().String()
+  sessionID := generateSessionID()
   log.Printf("%s [v2] Generated Session ID: %s", logPrefixInfo, sessionID)
 
   var wg sync.WaitGroup
@@ -293,13 +312,13 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
       closeOnce.Do(tunnelClose)
       return
     }
-    log.Printf("%s [v2] Upstream GET tunnel established, beginning stream.", logPrefixTunnel)
+    log.Printf("%s [v2] Upstream GET tunnel established", logPrefixTunnel)
 
     written, err := io.Copy(clientConn, getResp.Body)
-    log.Printf("%s [v2] Upstream -> Client stream copied %d bytes", logPrefixStream, written)
     if err != nil && !isExpectedError(err) {
-      log.Printf("%s [v2] Upstream -> Client stream error: %v", logPrefixError, err)
+      log.Printf("%s [v2] Stream error: %v", logPrefixError, err)
     }
+    log.Printf("%s [v2] Upstream -> Client copied %d bytes", logPrefixStream, written)
     closeOnce.Do(tunnelClose)
   }()
 
@@ -328,12 +347,22 @@ func isExpectedError(err error) bool {
   strings.Contains(err.Error(), "H3_REQUEST_CANCELLED")
 }
 
+// generateSessionID generates a random 6-character alphanumeric ID
+func generateSessionID() string {
+  const charset = "abcdefghijklmnopqrstuvwxyz0123456789"
+  b := make([]byte, 6)
+  for i := range b {
+    b[i] = charset[rand.Intn(len(charset))]
+  }
+  return string(b)
+}
+
 func main() {
   cfg := Config{}
   flag.StringVar(&cfg.ListenAddr, "listen", "127.0.0.1:8080", "Local address for the proxy to listen on")
   flag.StringVar(&cfg.UpstreamURLPOST, "url-post", "", "URL for POST/upload (e.g., http://server.com/tunnel)")
   flag.StringVar(&cfg.UpstreamURLGET, "url-get", "", "URL for GET/download (e.g., https://server.com/tunnel)")
-  flag.StringVar(&cfg.UpstreamAddr, "addr", "", "Override address for the upstream server (e.g., 127.0.0.1:8443)")
+  flag.StringVar(&cfg.UpstreamAddr, "addr", "", "Override IP address for the upstream server (e.g., 1.2.3.4)")
   flag.StringVar(&cfg.AuthToken, "token", "", "Authentication token for the upstream server")
   flag.IntVar(&cfg.Version, "version", 2, "Protocol version to use (1 or 2)")
   flag.Parse()
