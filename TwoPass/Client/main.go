@@ -86,7 +86,7 @@ func NewProxy(cfg Config) *Proxy {
   var transportGET http.RoundTripper
   if parsedGET.Scheme == "https" {
     log.Printf("%s Configuring GET client for H3 (HTTP/3 over QUIC)", logPrefixInfo)
-    transportGET = &http3.RoundTripper{
+    transportGET = &http3.Transport{
       TLSClientConfig: &tls.Config{
         InsecureSkipVerify: true,
       },

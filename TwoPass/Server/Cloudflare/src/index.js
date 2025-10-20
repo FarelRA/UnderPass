@@ -4,10 +4,14 @@ export class TCPSession {
   constructor(state, env) {
     this.socket = null;
     this.ready = null;
+    this.targetHost = null;
+    this.targetPort = null;
   }
 
   async connect(targetHost, targetPort) {
     if (!this.ready) {
+      this.targetHost = targetHost;
+      this.targetPort = targetPort;
       this.ready = (async () => {
         this.socket = connect(
           { hostname: targetHost, port: targetPort },
@@ -20,15 +24,15 @@ export class TCPSession {
   }
 
   async fetch(request) {
-    const targetHost = request.headers.get('X-Target-Host');
-    const targetPort = parseInt(request.headers.get('X-Target-Port'), 10);
     const sessionId = request.headers.get('X-Session-ID');
-
-    await this.connect(targetHost, targetPort);
 
     // POST: Upload (Client -> Target)
     if (request.method === 'POST') {
+      const targetHost = request.headers.get('X-Target-Host');
+      const targetPort = parseInt(request.headers.get('X-Target-Port'), 10);
+
       console.log(`[=] [v2] Upload starting for session ${sessionId}`);
+      await this.connect(targetHost, targetPort);
       request.body.pipeTo(this.socket.writable, { preventClose: true });
       return new Response(null, {
         status: 201,
@@ -42,6 +46,11 @@ export class TCPSession {
     // GET: Download (Target -> Client)
     if (request.method === 'GET') {
       console.log(`[=] [v2] Download starting for session ${sessionId}`);
+      // Wait for POST to establish connection
+      if (!this.ready) {
+        return new Response('Session not ready', { status: 503 });
+      }
+      await this.ready;
       return new Response(this.socket.readable, {
         headers: {
           'Content-Type': 'application/grpc',
