@@ -16,6 +16,7 @@ import (
   "sync"
   "time"
 
+  "github.com/quic-go/quic-go"
   "github.com/quic-go/quic-go/http3"
   "golang.org/x/net/http2"
 )
@@ -111,11 +112,21 @@ func NewProxy(cfg Config) *Proxy {
   var transportGET http.RoundTripper
   if parsedGET.Scheme == "https" {
     log.Printf("%s Configuring GET client for H3 (HTTP/3 over QUIC)", logPrefixInfo)
-    transportGET = &http3.Transport{
+    h3Transport := &http3.Transport{
       TLSClientConfig: &tls.Config{
         InsecureSkipVerify: true,
       },
     }
+    if cfg.UpstreamAddr != "" {
+      h3Transport.Dial = func(ctx context.Context, addr string, tlsCfg *tls.Config, quicCfg *quic.Config) (*quic.Conn, error) {
+        udpAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(cfg.UpstreamAddr, getPort))
+        if err != nil {
+          return nil, err
+        }
+        return quic.DialAddr(ctx, udpAddr.String(), tlsCfg, quicCfg)
+      }
+    }
+    transportGET = h3Transport
   } else {
     log.Printf("%s Configuring GET client for H2C (HTTP/2 over cleartext)", logPrefixInfo)
     transportGET = &http2.Transport{
