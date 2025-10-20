@@ -11,6 +11,7 @@ import (
   "net"
   "net/http"
   "net/url"
+  "strings"
   "sync"
   "time"
 
@@ -176,53 +177,34 @@ func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
     targetHost = "[" + targetHost + "]"
   }
 
-  reqReader, reqWriter := io.Pipe()
-  postReq, _ := http.NewRequestWithContext(r.Context(), "POST", p.config.UpstreamURLPOST, reqReader)
-  postReq.Header.Set("Authorization", "Basic "+p.config.AuthToken)
-  postReq.Header.Set("X-Target-Host", targetHost)
-  postReq.Header.Set("X-Target-Port", targetPort)
-  postReq.Header.Set("Content-Type", "application/grpc")
-
-  upstreamResp, err := p.httpClientPOST.Do(postReq)
-  if err != nil {
-    log.Printf("%s [v1] Failed to connect to upstream: %v", logPrefixError, err)
-    http.Error(w, "Failed to connect to upstream server", http.StatusBadGateway)
-    return
-  }
-
-  if upstreamResp.StatusCode != http.StatusOK {
-    upstreamResp.Body.Close()
-    log.Printf("%s [v1] Upstream returned status: %s", logPrefixError, upstreamResp.Status)
-    http.Error(w, "Upstream server failed to connect to target", http.StatusBadGateway)
-    return
-  }
-  log.Printf("%s [v1] Tunnel established to upstream", logPrefixTunnel)
-
   hijacker, _ := w.(http.Hijacker)
   clientConn, _, _ := hijacker.Hijack()
   clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 
-  var wg sync.WaitGroup
-  wg.Add(2)
-  go func() {
-    defer wg.Done()
-    written, err := io.Copy(reqWriter, clientConn)
-    log.Printf("%s [v1] Client -> Upstream stream copied %d bytes", logPrefixStream, written)
-    if err != nil && !errors.Is(err, net.ErrClosed) {
-      log.Printf("%s [v1] Client -> Upstream stream error: %v", logPrefixError, err)
-    }
-    reqWriter.Close()
-  }()
-  go func() {
-    defer wg.Done()
-    written, err := io.Copy(clientConn, upstreamResp.Body)
-    log.Printf("%s [v1] Upstream -> Client stream copied %d bytes", logPrefixStream, written)
-    if err != nil && !errors.Is(err, net.ErrClosed) {
-      log.Printf("%s [v1] Upstream -> Client stream error: %v", logPrefixError, err)
-    }
+  postReq, _ := http.NewRequestWithContext(r.Context(), "POST", p.config.UpstreamURLPOST, clientConn)
+  p.setTunnelHeaders(postReq, targetHost, targetPort, "")
+
+  upstreamResp, err := p.httpClientPOST.Do(postReq)
+  if err != nil {
+    log.Printf("%s [v1] Failed to connect to upstream: %v", logPrefixError, err)
     clientConn.Close()
-  }()
-  wg.Wait()
+    return
+  }
+  defer upstreamResp.Body.Close()
+
+  if upstreamResp.StatusCode != http.StatusOK {
+    log.Printf("%s [v1] Upstream returned status: %s", logPrefixError, upstreamResp.Status)
+    clientConn.Close()
+    return
+  }
+  log.Printf("%s [v1] Tunnel established to upstream", logPrefixTunnel)
+
+  written, err := io.Copy(clientConn, upstreamResp.Body)
+  log.Printf("%s [v1] Upstream -> Client stream copied %d bytes", logPrefixStream, written)
+  if err != nil && !isExpectedError(err) {
+    log.Printf("%s [v1] Stream error: %v", logPrefixError, err)
+  }
+  clientConn.Close()
 
   log.Printf("%s [v1] Connection closed for %s", logPrefixClose, r.Host)
 }
@@ -268,39 +250,27 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
   }
 
   // POST request (client -> target)
-  postPipeR, postPipeW := io.Pipe()
   go func() {
     defer wg.Done()
-    defer postPipeW.Close()
-    written, err := io.Copy(postPipeW, clientConn)
-    log.Printf("%s [v2] Client -> Upstream stream copied %d bytes", logPrefixStream, written)
-    if err != nil && !errors.Is(err, net.ErrClosed) {
-      log.Printf("%s [v2] Client -> Upstream stream error: %v", logPrefixError, err)
-    }
-    closeOnce.Do(tunnelClose)
-  }()
 
-  go func() {
-    postReq, _ := http.NewRequestWithContext(ctx, "POST", p.config.UpstreamURLPOST, postPipeR)
-    postReq.Header.Set("Authorization", "Basic "+p.config.AuthToken)
-    postReq.Header.Set("X-Target-Host", targetHost)
-    postReq.Header.Set("X-Target-Port", targetPort)
-    postReq.Header.Set("X-Session-ID", sessionID)
-    postReq.Header.Set("Content-Type", "application/grpc")
+    postReq, _ := http.NewRequestWithContext(ctx, "POST", p.config.UpstreamURLPOST, clientConn)
+    p.setTunnelHeaders(postReq, targetHost, targetPort, sessionID)
 
     postResp, err := p.httpClientPOST.Do(postReq)
-    if err != nil {
+    if err != nil && !isExpectedError(err) {
       log.Printf("%s [v2] POST request failed: %v", logPrefixError, err)
       closeOnce.Do(tunnelClose)
       return
     }
-    defer postResp.Body.Close()
-    io.Copy(io.Discard, postResp.Body)
-    if postResp.StatusCode != http.StatusCreated {
-      log.Printf("%s [v2] Upstream POST failed with status: %s", logPrefixError, postResp.Status)
-      closeOnce.Do(tunnelClose)
+    if postResp != nil {
+      defer postResp.Body.Close()
+      if postResp.StatusCode != http.StatusCreated {
+        log.Printf("%s [v2] Upstream POST failed with status: %s", logPrefixError, postResp.Status)
+        closeOnce.Do(tunnelClose)
+        return
+      }
+      log.Printf("%s [v2] Upstream POST tunnel established", logPrefixTunnel)
     }
-    log.Printf("%s [v2] Upstream POST tunnel established", logPrefixTunnel)
   }()
 
   // GET request (target -> client)
@@ -308,14 +278,10 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
     defer wg.Done()
 
     getReq, _ := http.NewRequestWithContext(ctx, "GET", p.config.UpstreamURLGET, nil)
-    getReq.Header.Set("Authorization", "Basic "+p.config.AuthToken)
-    getReq.Header.Set("X-Target-Host", targetHost)
-    getReq.Header.Set("X-Target-Port", targetPort)
-    getReq.Header.Set("X-Session-ID", sessionID)
-    getReq.Header.Set("Content-Type", "application/grpc")
+    p.setTunnelHeaders(getReq, targetHost, targetPort, sessionID)
 
     getResp, err := p.httpClientGET.Do(getReq)
-    if err != nil {
+    if err != nil && !isExpectedError(err) {
       log.Printf("%s [v2] GET request failed: %v", logPrefixError, err)
       closeOnce.Do(tunnelClose)
       return
@@ -331,7 +297,7 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
 
     written, err := io.Copy(clientConn, getResp.Body)
     log.Printf("%s [v2] Upstream -> Client stream copied %d bytes", logPrefixStream, written)
-    if err != nil && !errors.Is(err, net.ErrClosed) {
+    if err != nil && !isExpectedError(err) {
       log.Printf("%s [v2] Upstream -> Client stream error: %v", logPrefixError, err)
     }
     closeOnce.Do(tunnelClose)
@@ -339,6 +305,27 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
 
   wg.Wait()
   log.Printf("%s [v2] Connection closed for %s", logPrefixClose, r.Host)
+}
+
+// setTunnelHeaders sets common headers for tunnel requests
+func (p *Proxy) setTunnelHeaders(req *http.Request, targetHost, targetPort, sessionID string) {
+  req.Header.Set("Authorization", "Basic "+p.config.AuthToken)
+  req.Header.Set("X-Target-Host", targetHost)
+  req.Header.Set("X-Target-Port", targetPort)
+  req.Header.Set("Content-Type", "application/grpc")
+  if sessionID != "" {
+    req.Header.Set("X-Session-ID", sessionID)
+  }
+}
+
+// isExpectedError checks if an error is expected during normal cleanup
+func isExpectedError(err error) bool {
+  if err == nil {
+    return true
+  }
+  return errors.Is(err, context.Canceled) ||
+  errors.Is(err, net.ErrClosed) ||
+  strings.Contains(err.Error(), "H3_REQUEST_CANCELLED")
 }
 
 func main() {
