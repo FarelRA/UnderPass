@@ -9,7 +9,7 @@ bindings = [
 
 [[migrations]]
 tag = "v1"
-new_classes = ["TCPSession"]
+new_sqlite_classes = ["TCPSession"]
 
 [observability]
 enabled = true
