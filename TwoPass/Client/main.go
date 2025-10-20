@@ -290,6 +290,7 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
       }
       log.Printf("%s [v2] Upstream POST tunnel established", logPrefixTunnel)
     }
+    closeOnce.Do(tunnelClose)
   }()
 
   // GET request (target -> client)
@@ -314,11 +315,10 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
     }
     log.Printf("%s [v2] Upstream GET tunnel established", logPrefixTunnel)
 
-    written, err := io.Copy(clientConn, getResp.Body)
+    _, err = io.Copy(clientConn, getResp.Body)
     if err != nil && !isExpectedError(err) {
       log.Printf("%s [v2] Stream error: %v", logPrefixError, err)
     }
-    log.Printf("%s [v2] Upstream -> Client copied %d bytes", logPrefixStream, written)
     closeOnce.Do(tunnelClose)
   }()
 
