@@ -1,4 +1,3 @@
-// TCP tunnel client over HTTP/2 stream
 package main
 
 import (
@@ -15,10 +14,10 @@ import (
   "time"
 
   "github.com/google/uuid"
+  "github.com/quic-go/quic-go/http3"
   "golang.org/x/net/http2"
 )
 
-// Constants for structured logging prefixes
 const (
   logPrefixInfo    = "[*]"
   logPrefixSuccess = "[+]"
@@ -29,42 +28,38 @@ const (
   logPrefixError   = "[!]"
 )
 
-// Config holds the client's configuration.
 type Config struct {
-  ListenAddr   string
-  UpstreamURL  string
-  UpstreamAddr string
-  AuthToken    string
-  Version      int // Protocol version (1 or 2)
+  ListenAddr      string
+  UpstreamURLPOST string // URL for POST (upload)
+  UpstreamURLGET  string // URL for GET (download)
+  UpstreamAddr    string
+  AuthToken       string
+  Version         int
 }
 
-// Proxy holds the state and configuration for our proxy server.
 type Proxy struct {
-  config     Config
-  httpClient *http.Client
+  config         Config
+  httpClientPOST *http.Client
+  httpClientGET  *http.Client
 }
 
-// NewProxy creates and initializes a new Proxy instance.
 func NewProxy(cfg Config) *Proxy {
-  parsedURL, _ := url.Parse(cfg.UpstreamURL)
+  parsedPOST, _ := url.Parse(cfg.UpstreamURLPOST)
+  parsedGET, _ := url.Parse(cfg.UpstreamURLGET)
   dialer := &net.Dialer{Timeout: 5 * time.Second}
 
-  dialContext := func(ctx context.Context, network, addr string) (net.Conn, error) {
-    log.Printf("%s Establishing new connection to upstream", logPrefixSuccess)
-    if cfg.UpstreamAddr != "" {
-      addr = cfg.UpstreamAddr
-    } else {
-      addr = parsedURL.Host
-    }
-    return dialer.DialContext(ctx, network, addr)
-  }
-
-  var transport http.RoundTripper
-  if parsedURL.Scheme == "https" {
-    log.Printf("%s Configuring client for H2 (HTTP/2 over TLS)", logPrefixInfo)
-    transport = &http.Transport{
+  // POST client (HTTP or HTTP/2)
+  var transportPOST http.RoundTripper
+  if parsedPOST.Scheme == "https" {
+    log.Printf("%s Configuring POST client for H2 (HTTP/2 over TLS)", logPrefixInfo)
+    transportPOST = &http.Transport{
       ForceAttemptHTTP2: true,
-      DialContext:       dialContext,
+      DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+        if cfg.UpstreamAddr != "" {
+          addr = cfg.UpstreamAddr
+        }
+        return dialer.DialContext(ctx, network, addr)
+      },
       TLSClientConfig: &tls.Config{
         NextProtos:         []string{"h2"},
         InsecureSkipVerify: true,
@@ -72,11 +67,41 @@ func NewProxy(cfg Config) *Proxy {
       IdleConnTimeout: 120 * time.Second,
     }
   } else {
-    log.Printf("%s Configuring client for H2C (HTTP/2 over cleartext)", logPrefixInfo)
-    transport = &http2.Transport{
+    log.Printf("%s Configuring POST client for H2C (HTTP/2 over cleartext)", logPrefixInfo)
+    transportPOST = &http2.Transport{
       AllowHTTP: true,
       DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-        return dialContext(ctx, network, addr)
+        if cfg.UpstreamAddr != "" {
+          addr = cfg.UpstreamAddr
+        } else {
+          addr = parsedPOST.Host
+        }
+        return dialer.DialContext(ctx, network, addr)
+      },
+      IdleConnTimeout: 120 * time.Second,
+    }
+  }
+
+  // GET client (HTTP/2 or HTTP/3)
+  var transportGET http.RoundTripper
+  if parsedGET.Scheme == "https" {
+    log.Printf("%s Configuring GET client for H3 (HTTP/3 over QUIC)", logPrefixInfo)
+    transportGET = &http3.RoundTripper{
+      TLSClientConfig: &tls.Config{
+        InsecureSkipVerify: true,
+      },
+    }
+  } else {
+    log.Printf("%s Configuring GET client for H2C (HTTP/2 over cleartext)", logPrefixInfo)
+    transportGET = &http2.Transport{
+      AllowHTTP: true,
+      DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+        if cfg.UpstreamAddr != "" {
+          addr = cfg.UpstreamAddr
+        } else {
+          addr = parsedGET.Host
+        }
+        return dialer.DialContext(ctx, network, addr)
       },
       IdleConnTimeout: 120 * time.Second,
     }
@@ -84,16 +109,19 @@ func NewProxy(cfg Config) *Proxy {
 
   return &Proxy{
     config: cfg,
-    httpClient: &http.Client{
-      Transport: transport,
+    httpClientPOST: &http.Client{
+      Transport: transportPOST,
+    },
+    httpClientGET: &http.Client{
+      Transport: transportGET,
     },
   }
 }
 
-// Start runs the HTTP proxy server.
 func (p *Proxy) Start() error {
   log.Printf("%s Listening for connections on: %s", logPrefixInfo, p.config.ListenAddr)
-  log.Printf("%s Forwarding to upstream server at: %s", logPrefixInfo, p.config.UpstreamURL)
+  log.Printf("%s POST (upload) to: %s", logPrefixInfo, p.config.UpstreamURLPOST)
+  log.Printf("%s GET (download) from: %s", logPrefixInfo, p.config.UpstreamURLGET)
   log.Printf("%s Using protocol version: v%d", logPrefixInfo, p.config.Version)
   if p.config.UpstreamAddr != "" {
     log.Printf("%s Upstream address override is active: %s", logPrefixInfo, p.config.UpstreamAddr)
@@ -107,7 +135,6 @@ func (p *Proxy) Start() error {
   return server.ListenAndServe()
 }
 
-// dispatchRequest directs incoming requests to the correct protocol handler.
 func (p *Proxy) dispatchRequest(w http.ResponseWriter, r *http.Request) {
   log.Printf("%s Accepted connection from %s", logPrefixSuccess, r.RemoteAddr)
 
@@ -128,7 +155,6 @@ func (p *Proxy) dispatchRequest(w http.ResponseWriter, r *http.Request) {
   }
 }
 
-// handleConnectV1 handles the logic for a CONNECT request using the original protocol.
 func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
   log.Printf("%s [v1] Proxy request for %s", logPrefixRequest, r.Host)
 
@@ -142,13 +168,13 @@ func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
   }
 
   reqReader, reqWriter := io.Pipe()
-  postReq, _ := http.NewRequestWithContext(r.Context(), "POST", p.config.UpstreamURL, reqReader)
+  postReq, _ := http.NewRequestWithContext(r.Context(), "POST", p.config.UpstreamURLPOST, reqReader)
   postReq.Header.Set("Authorization", "Basic "+p.config.AuthToken)
   postReq.Header.Set("X-Target-Host", targetHost)
   postReq.Header.Set("X-Target-Port", targetPort)
   postReq.Header.Set("Content-Type", "application/grpc")
 
-  upstreamResp, err := p.httpClient.Do(postReq)
+  upstreamResp, err := p.httpClientPOST.Do(postReq)
   if err != nil {
     http.Error(w, "Failed to connect to upstream server", http.StatusBadGateway)
     return
@@ -178,7 +204,6 @@ func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
   log.Printf("%s [v1] Connection closed for %s", logPrefixClose, r.Host)
 }
 
-// handleConnectV2 handles the logic for a CONNECT request using the decoupled protocol.
 func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
   log.Printf("%s [v2] Proxy request for %s", logPrefixRequest, r.Host)
   targetHost, targetPort, err := net.SplitHostPort(r.Host)
@@ -191,7 +216,6 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
     targetHost = "[" + targetHost + "]"
   }
 
-  // Step 1: Hijack the connection and notify the client.
   hijacker, ok := w.(http.Hijacker)
   if !ok {
     http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
@@ -204,12 +228,11 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
   }
   clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
 
-  // Step 2: Prepare for two concurrent streams with a shared context for cancellation.
   ctx, cancel := context.WithCancel(r.Context())
   defer cancel()
 
-  tunnelID := uuid.New().String()
-  log.Printf("%s [v2] Generated Tunnel ID: %s", logPrefixInfo, tunnelID)
+  sessionID := uuid.New().String()
+  log.Printf("%s [v2] Generated Session ID: %s", logPrefixInfo, sessionID)
 
   var wg sync.WaitGroup
   wg.Add(2)
@@ -217,10 +240,10 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
   var closeOnce sync.Once
   tunnelClose := func() {
     clientConn.Close()
-    cancel() // Ensure both streams are terminated
+    cancel()
   }
 
-  // Step 3: Goroutine for the POST request (client -> target)
+  // POST request (client -> target)
   postPipeR, postPipeW := io.Pipe()
   go func() {
     defer wg.Done()
@@ -234,21 +257,21 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
   }()
 
   go func() {
-    postReq, _ := http.NewRequestWithContext(ctx, "POST", p.config.UpstreamURL, postPipeR)
+    postReq, _ := http.NewRequestWithContext(ctx, "POST", p.config.UpstreamURLPOST, postPipeR)
     postReq.Header.Set("Authorization", "Basic "+p.config.AuthToken)
     postReq.Header.Set("X-Target-Host", targetHost)
     postReq.Header.Set("X-Target-Port", targetPort)
-    postReq.Header.Set("X-Tunnel-Id", tunnelID)
+    postReq.Header.Set("X-Session-ID", sessionID)
     postReq.Header.Set("Content-Type", "application/grpc")
 
-    postResp, err := p.httpClient.Do(postReq)
+    postResp, err := p.httpClientPOST.Do(postReq)
     if err != nil {
       log.Printf("%s [v2] POST request failed: %v", logPrefixError, err)
       closeOnce.Do(tunnelClose)
       return
     }
     defer postResp.Body.Close()
-    io.Copy(io.Discard, postResp.Body) // Read and discard body to allow connection reuse
+    io.Copy(io.Discard, postResp.Body)
     if postResp.StatusCode != http.StatusCreated {
       log.Printf("%s [v2] Upstream POST failed with status: %s", logPrefixError, postResp.Status)
       closeOnce.Do(tunnelClose)
@@ -256,16 +279,16 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
     log.Printf("%s [v2] Upstream POST tunnel established", logPrefixTunnel)
   }()
 
-  // Step 4: Goroutine for the GET request (target -> client)
+  // GET request (target -> client)
   go func() {
     defer wg.Done()
 
-    getReq, _ := http.NewRequestWithContext(ctx, "GET", p.config.UpstreamURL, nil)
+    getReq, _ := http.NewRequestWithContext(ctx, "GET", p.config.UpstreamURLGET, nil)
     getReq.Header.Set("Authorization", "Basic "+p.config.AuthToken)
-    getReq.Header.Set("X-Tunnel-Id", tunnelID)
+    getReq.Header.Set("X-Session-ID", sessionID)
     getReq.Header.Set("Content-Type", "application/grpc")
 
-    getResp, err := p.httpClient.Do(getReq)
+    getResp, err := p.httpClientGET.Do(getReq)
     if err != nil {
       log.Printf("%s [v2] GET request failed: %v", logPrefixError, err)
       closeOnce.Do(tunnelClose)
@@ -295,15 +318,16 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
 func main() {
   cfg := Config{}
   flag.StringVar(&cfg.ListenAddr, "listen", "127.0.0.1:8080", "Local address for the proxy to listen on")
-  flag.StringVar(&cfg.UpstreamURL, "url", "", "URL of the upstream server (e.g., https://server.com/tunnel)")
+  flag.StringVar(&cfg.UpstreamURLPOST, "url-post", "", "URL for POST/upload (e.g., http://server.com/tunnel)")
+  flag.StringVar(&cfg.UpstreamURLGET, "url-get", "", "URL for GET/download (e.g., https://server.com/tunnel)")
   flag.StringVar(&cfg.UpstreamAddr, "addr", "", "Override address for the upstream server (e.g., 127.0.0.1:8443)")
   flag.StringVar(&cfg.AuthToken, "token", "", "Authentication token for the upstream server")
   flag.IntVar(&cfg.Version, "version", 2, "Protocol version to use (1 or 2)")
   flag.Parse()
 
-  if cfg.UpstreamURL == "" || cfg.AuthToken == "" {
+  if cfg.UpstreamURLPOST == "" || cfg.UpstreamURLGET == "" || cfg.AuthToken == "" {
     flag.Usage()
-    log.Fatalf("%s Upstream URL and Authentication token are required. Set via -url and -token flags.", logPrefixError)
+    log.Fatalf("%s Upstream URLs and Authentication token are required.", logPrefixError)
   }
 
   if cfg.Version != 1 && cfg.Version != 2 {

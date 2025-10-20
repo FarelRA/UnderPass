@@ -1,6 +1,15 @@
 name = "twopass"
 main = "src/index.js"
-compatibility_date = "2025-08-29"
+compatibility_date = "2025-10-20"
+
+[durable_objects]
+bindings = [
+  { name = "TCP_SESSION", class_name = "TCPSession" }
+]
+
+[[migrations]]
+tag = "v1"
+new_classes = ["TCPSession"]
 
 [observability]
 enabled = true
