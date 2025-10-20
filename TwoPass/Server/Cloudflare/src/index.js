@@ -30,6 +30,7 @@ export class TCPSession {
     if (request.method === 'POST') {
       console.log(`[=] [v2] Upload starting for session ${sessionId}`);
       await request.body.pipeTo(this.socket.writable, { preventClose: true });
+      console.log(`[=] [v2] Upload complete for ${sessionId}`);
       return new Response(null, {
         status: 201,
         headers: {
@@ -66,7 +67,9 @@ async function handleV1(request, targetHost, targetPort, ctx) {
 
     console.log(`[<] [v1] Connected to ${targetHost}:${targetPort}`);
 
-    ctx.waitUntil(request.body.pipeTo(socket.writable, { preventClose: true }));
+    request.body.pipeTo(socket.writable, { preventClose: true }).catch(err => {
+      console.error(`[!] [v1] Upload stream error: ${err.message}`);
+    });
 
     return new Response(socket.readable, {
       headers: {

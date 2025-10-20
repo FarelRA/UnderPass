@@ -34,8 +34,8 @@ const (
 // Config holds the client's configuration.
 type Config struct {
   ListenAddr      string
-  UpstreamURLPOST string // URL for POST (upload)
-  UpstreamURLGET  string // URL for GET (download)
+  UpstreamURLPOST string
+  UpstreamURLGET  string
   UpstreamAddr    string
   AuthToken       string
   Version         int

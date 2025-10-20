@@ -59,7 +59,7 @@ class TCPSession {
   }
 }
 
-// V1: Single stream (legacy)
+// V1: Single bidirectional stream
 async function handleV1(request, targetHost, targetPort) {
   console.log(`[>] [v1] Proxy request for ${targetHost}:${targetPort}`);
 
