@@ -281,15 +281,18 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
       closeOnce.Do(tunnelClose)
       return
     }
-    if postResp != nil {
-      defer postResp.Body.Close()
-      if postResp.StatusCode != http.StatusCreated {
-        log.Printf("%s [v2] Upstream POST failed with status: %s", logPrefixError, postResp.Status)
-        closeOnce.Do(tunnelClose)
-        return
-      }
-      log.Printf("%s [v2] Upstream POST tunnel established", logPrefixTunnel)
+    if postResp == nil {
+      closeOnce.Do(tunnelClose)
+      return
     }
+    defer postResp.Body.Close()
+
+    if postResp.StatusCode != http.StatusCreated {
+      log.Printf("%s [v2] Upstream POST failed with status: %s", logPrefixError, postResp.Status)
+      closeOnce.Do(tunnelClose)
+      return
+    }
+    log.Printf("%s [v2] Upstream POST tunnel established", logPrefixTunnel)
     closeOnce.Do(tunnelClose)
   }()
 
@@ -303,6 +306,10 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
     getResp, err := p.httpClientGET.Do(getReq)
     if err != nil && !isExpectedError(err) {
       log.Printf("%s [v2] GET request failed: %v", logPrefixError, err)
+      closeOnce.Do(tunnelClose)
+      return
+    }
+    if getResp == nil {
       closeOnce.Do(tunnelClose)
       return
     }
