@@ -1,3 +1,4 @@
+// TCP tunnel client over HTTP/2 stream
 package main
 
 import (
@@ -18,6 +19,7 @@ import (
   "golang.org/x/net/http2"
 )
 
+// Constants for structured logging prefixes
 const (
   logPrefixInfo    = "[*]"
   logPrefixSuccess = "[+]"
@@ -28,6 +30,7 @@ const (
   logPrefixError   = "[!]"
 )
 
+// Config holds the client's configuration.
 type Config struct {
   ListenAddr      string
   UpstreamURLPOST string // URL for POST (upload)
@@ -37,12 +40,14 @@ type Config struct {
   Version         int
 }
 
+// Proxy holds the state and configuration for our proxy server.
 type Proxy struct {
   config         Config
   httpClientPOST *http.Client
   httpClientGET  *http.Client
 }
 
+// NewProxy creates and initializes a new Proxy instance.
 func NewProxy(cfg Config) *Proxy {
   parsedPOST, _ := url.Parse(cfg.UpstreamURLPOST)
   parsedGET, _ := url.Parse(cfg.UpstreamURLGET)
@@ -118,6 +123,7 @@ func NewProxy(cfg Config) *Proxy {
   }
 }
 
+// Start runs the HTTP proxy server.
 func (p *Proxy) Start() error {
   log.Printf("%s Listening for connections on: %s", logPrefixInfo, p.config.ListenAddr)
   log.Printf("%s POST (upload) to: %s", logPrefixInfo, p.config.UpstreamURLPOST)
@@ -135,6 +141,7 @@ func (p *Proxy) Start() error {
   return server.ListenAndServe()
 }
 
+// dispatchRequest directs incoming requests to the correct protocol handler.
 func (p *Proxy) dispatchRequest(w http.ResponseWriter, r *http.Request) {
   log.Printf("%s Accepted connection from %s", logPrefixSuccess, r.RemoteAddr)
 
@@ -155,11 +162,13 @@ func (p *Proxy) dispatchRequest(w http.ResponseWriter, r *http.Request) {
   }
 }
 
+// handleConnectV1 handles the logic for a CONNECT request using the original protocol.
 func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
   log.Printf("%s [v1] Proxy request for %s", logPrefixRequest, r.Host)
 
   targetHost, targetPort, err := net.SplitHostPort(r.Host)
   if err != nil {
+    log.Printf("%s [v1] Invalid target host format: %s", logPrefixError, r.Host)
     http.Error(w, "Invalid target host format", http.StatusBadRequest)
     return
   }
@@ -176,12 +185,14 @@ func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
 
   upstreamResp, err := p.httpClientPOST.Do(postReq)
   if err != nil {
+    log.Printf("%s [v1] Failed to connect to upstream: %v", logPrefixError, err)
     http.Error(w, "Failed to connect to upstream server", http.StatusBadGateway)
     return
   }
 
   if upstreamResp.StatusCode != http.StatusOK {
     upstreamResp.Body.Close()
+    log.Printf("%s [v1] Upstream returned status: %s", logPrefixError, upstreamResp.Status)
     http.Error(w, "Upstream server failed to connect to target", http.StatusBadGateway)
     return
   }
@@ -194,22 +205,35 @@ func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
   var wg sync.WaitGroup
   wg.Add(2)
   go func() {
-    defer wg.Done(); io.Copy(reqWriter, clientConn); reqWriter.Close()
+    defer wg.Done()
+    written, err := io.Copy(reqWriter, clientConn)
+    log.Printf("%s [v1] Client -> Upstream stream copied %d bytes", logPrefixStream, written)
+    if err != nil && !errors.Is(err, net.ErrClosed) {
+      log.Printf("%s [v1] Client -> Upstream stream error: %v", logPrefixError, err)
+    }
+    reqWriter.Close()
   }()
   go func() {
-    defer wg.Done(); io.Copy(clientConn, upstreamResp.Body); clientConn.Close()
+    defer wg.Done()
+    written, err := io.Copy(clientConn, upstreamResp.Body)
+    log.Printf("%s [v1] Upstream -> Client stream copied %d bytes", logPrefixStream, written)
+    if err != nil && !errors.Is(err, net.ErrClosed) {
+      log.Printf("%s [v1] Upstream -> Client stream error: %v", logPrefixError, err)
+    }
+    clientConn.Close()
   }()
   wg.Wait()
 
   log.Printf("%s [v1] Connection closed for %s", logPrefixClose, r.Host)
 }
 
+// handleConnectV2 handles the logic for a CONNECT request using the decoupled protocol.
 func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
   log.Printf("%s [v2] Proxy request for %s", logPrefixRequest, r.Host)
   targetHost, targetPort, err := net.SplitHostPort(r.Host)
   if err != nil {
     http.Error(w, "Invalid target host format", http.StatusBadRequest)
-    log.Printf("%s Invalid CONNECT host: %s", logPrefixError, r.Host)
+    log.Printf("%s [v2] Invalid CONNECT host: %s", logPrefixError, r.Host)
     return
   }
   if ip := net.ParseIP(targetHost); ip != nil && ip.To4() == nil && targetHost[0] != '[' {
@@ -251,7 +275,7 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
     written, err := io.Copy(postPipeW, clientConn)
     log.Printf("%s [v2] Client -> Upstream stream copied %d bytes", logPrefixStream, written)
     if err != nil && !errors.Is(err, net.ErrClosed) {
-      log.Printf("%s [v2] Client -> Upstream stream finished with err: %v", logPrefixError, err)
+      log.Printf("%s [v2] Client -> Upstream stream error: %v", logPrefixError, err)
     }
     closeOnce.Do(tunnelClose)
   }()
@@ -285,6 +309,8 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
 
     getReq, _ := http.NewRequestWithContext(ctx, "GET", p.config.UpstreamURLGET, nil)
     getReq.Header.Set("Authorization", "Basic "+p.config.AuthToken)
+    getReq.Header.Set("X-Target-Host", targetHost)
+    getReq.Header.Set("X-Target-Port", targetPort)
     getReq.Header.Set("X-Session-ID", sessionID)
     getReq.Header.Set("Content-Type", "application/grpc")
 
@@ -306,7 +332,7 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
     written, err := io.Copy(clientConn, getResp.Body)
     log.Printf("%s [v2] Upstream -> Client stream copied %d bytes", logPrefixStream, written)
     if err != nil && !errors.Is(err, net.ErrClosed) {
-      log.Printf("%s [v2] Upstream -> Client stream finished with err: %v", logPrefixError, err)
+      log.Printf("%s [v2] Upstream -> Client stream error: %v", logPrefixError, err)
     }
     closeOnce.Do(tunnelClose)
   }()
