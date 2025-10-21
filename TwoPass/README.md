@@ -16,7 +16,7 @@ TwoPass provides a robust TCP proxy that tunnels connections through HTTP/2 and 
 - ⚡ **High Performance**: Zero-copy streaming, 128KB buffers, connection pooling
 - 🌐 **Multi-Platform**: Cloudflare Workers (edge) and Deno Deploy (serverless)
 - 📊 **Structured Logging**: Request IDs, symmetric log prefixes
-- 🛡️ **Robust**: Comprehensive error handling, automatic cleanup, session TTL
+- 🛡️ **Robust**: Comprehensive error handling, automatic cleanup
 - 🔧 **Configurable**: Timeouts, TLS verification, address override
 
 ## Architecture
@@ -28,7 +28,7 @@ Client ←→ HTTP/2 POST (bidirectional) ←→ Server ←→ Target
 - Single POST request with request body as upload stream
 - Response body as download stream
 - Lower latency, simpler implementation
-- Uses `ctx.waitUntil()` (Cloudflare) to keep upload alive
+- Uses `ctx.waitUntil()` (in Cloudflare) to keep upload alive
 
 ### V2 Protocol (Decoupled)
 ```
@@ -39,7 +39,7 @@ Client ← HTTP/3 GET (download) ← Server ← Target
 - POST sends data from client to target
 - GET receives data from target to client
 - Supports HTTP/3 (QUIC) for download stream
-- Session-based with automatic TTL cleanup (60s)
+- Session-based with automatic cleanup
 
 ## Components
 
@@ -57,7 +57,7 @@ Client ← HTTP/3 GET (download) ← Server ← Target
 
 ### Server (Deno Deploy)
 - Alternative serverless platform
-- Session TTL management (60s)
+- Session automatic cleanup
 - Symmetric behavior with Cloudflare
 - Native HTTP/2 support
 
@@ -341,16 +341,9 @@ All components use symmetric logging prefixes:
 - `[-]` Close/cleanup
 - `[!]` Error
 
-V1 uses random 8-char request IDs, V2 uses 6-char session IDs.
+V1 uses random 6-char request IDs, V2 uses 6-char session IDs.
 
 ## Performance
-
-### Benchmarks
-
-- **Latency**: V1 ~50ms, V2 ~100ms (additional round-trip)
-- **Throughput**: Up to 100 Mbps per connection (network dependent)
-- **Connections**: 100+ concurrent connections supported
-- **Memory**: ~10MB per 100 connections (client), minimal (servers)
 
 ### Optimization
 
