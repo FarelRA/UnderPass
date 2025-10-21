@@ -1,6 +1,6 @@
 module twopass
 
-go 1.25.3
+go 1.23
 
 require (
 	github.com/quic-go/quic-go v0.55.0
