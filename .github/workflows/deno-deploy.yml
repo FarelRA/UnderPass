@@ -1,10 +1,10 @@
-name: Deno Deploy
+name: TwoPass Deno Deploy
 
 on:
   push:
     branches: [ main ]
     paths:
-      - 'Server/Deno/**'
+      - 'TwoPass/Server/Deno/**'
       - '.github/workflows/deno-deploy.yml'
   workflow_dispatch:
 
@@ -21,11 +21,11 @@ jobs:
           deno-version: v1.x
       
       - name: Run Deno lint
-        working-directory: ./Server/Deno
+        working-directory: ./TwoPass/Server/Deno
         run: deno lint src/
       
       - name: Run Deno fmt check
-        working-directory: ./Server/Deno
+        working-directory: ./TwoPass/Server/Deno
         run: deno fmt --check src/
 
   test:
@@ -40,7 +40,7 @@ jobs:
           deno-version: v1.x
       
       - name: Run tests
-        working-directory: ./Server/Deno
+        working-directory: ./TwoPass/Server/Deno
         run: deno test --allow-net --allow-env src/
 
   deploy:
@@ -59,4 +59,4 @@ jobs:
         with:
           project: ${{ secrets.DENO_PROJECT_NAME }}
           entrypoint: src/index.js
-          root: Server/Deno
+          root: TwoPass/Server/Deno
