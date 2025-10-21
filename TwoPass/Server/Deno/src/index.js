@@ -89,11 +89,7 @@ class TCPSession {
 
     // GET: Download (Target -> Client)
     if (request.method === "GET") {
-      if (this.getDone) {
-        return new Response("GET already in progress", { status: STATUS_BAD_REQUEST });
-      }
       console.log(`[=] [v2] [${sessionId}] Download starting`);
-      this.getDone = true;
       return new Response(this.socket.readable, {
         headers: {
           "Content-Type": "application/grpc",
