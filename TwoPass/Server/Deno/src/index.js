@@ -67,7 +67,7 @@ async function handleV1(request, targetHost, targetPort) {
     const socket = await Deno.connect({ hostname: targetHost, port: targetPort });
     console.log(`[<] [v1] Connected to ${targetHost}:${targetPort}`);
 
-    await request.body.pipeTo(socket.writable).catch(err => {
+    request.body.pipeTo(socket.writable).catch(err => {
       console.error(`[!] [v1] Upload stream error: ${err.message}`);
     });
 
