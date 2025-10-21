@@ -158,7 +158,7 @@ export default {
 
     // Validate target
     const targetHost = request.headers.get('X-Target-Host')?.toLowerCase().trim();
-    if (!targetHost || !/^([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$|^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$|^\[[0-9a-f:]+\]$/i.test(targetHost)) {
+    if (!targetHost || !/^[\w\-.:[\]]+$/.test(targetHost)) {
       console.log(`[!] Invalid target host: ${targetHost}`);
       return new Response('Invalid target host', { status: STATUS_BAD_REQUEST });
     }
