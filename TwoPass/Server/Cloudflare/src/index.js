@@ -118,7 +118,7 @@ export class TCPSession {
  * @returns {Response} HTTP response with bidirectional stream
  */
 async function handleV1(request, targetHost, targetPort, ctx) {
-  const requestId = crypto.randomUUID().substring(0, 8);
+  const requestId = Math.random().toString(36).substring(2, 8);
   console.log(`[>] [v1] [${requestId}] Proxy request for ${targetHost}:${targetPort}`);
 
   try {
