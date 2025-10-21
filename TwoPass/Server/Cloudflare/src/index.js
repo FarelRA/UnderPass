@@ -191,11 +191,11 @@ export default {
     }
 
     // V1: Single bidirectional stream
-    if (request.method !== 'POST') {
-      console.log(`[!] [v1] Method not allowed: ${request.method}`);
-      return new Response('Method not allowed', { status: STATUS_METHOD_NOT_ALLOWED });
+    if (request.method === 'POST') {
+      return handleV1(request, targetHost, targetPort, ctx);
     }
 
-    return handleV1(request, targetHost, targetPort, ctx);
+    console.log(`[!] [v1] Method not allowed: ${request.method}`);
+    return new Response('Method not allowed', { status: STATUS_METHOD_NOT_ALLOWED });
   }
 };
