@@ -44,7 +44,9 @@ type Config struct {
   UpstreamAddr       string
   AuthToken          string
   Version            int
-  HTTPVersion        string // "auto", "h2", "h2c", "h3"
+  HTTPVersion        string // Shorthand for both
+  HTTPVersionPOST    string // POST-specific
+  HTTPVersionGET     string // GET-specific
   InsecureSkipVerify bool
   ConnTimeout        time.Duration
   StreamTimeout      time.Duration
@@ -91,8 +93,11 @@ func NewProxy(cfg Config) (*Proxy, error) {
 
   // POST client configuration based on HTTPVersion
   var transportPOST http.RoundTripper
-  httpVersion := cfg.HTTPVersion
-  if httpVersion == "auto" {
+  httpVersion := cfg.HTTPVersionPOST
+  if httpVersion == "" {
+    httpVersion = cfg.HTTPVersion
+  }
+  if httpVersion == "" || httpVersion == "auto" {
     if parsedPOST.Scheme == "https" {
       httpVersion = "h2"
     } else {
@@ -156,8 +161,11 @@ func NewProxy(cfg Config) (*Proxy, error) {
   // GET client configuration for V2
   var transportGET http.RoundTripper
   if cfg.Version == 2 {
-    getHTTPVersion := cfg.HTTPVersion
-    if getHTTPVersion == "auto" {
+    getHTTPVersion := cfg.HTTPVersionGET
+    if getHTTPVersion == "" {
+      getHTTPVersion = cfg.HTTPVersion
+    }
+    if getHTTPVersion == "" || getHTTPVersion == "auto" {
       if parsedGET.Scheme == "https" {
         getHTTPVersion = "h3"
       } else {
@@ -531,7 +539,9 @@ func main() {
   flag.StringVar(&cfg.UpstreamAddr, "addr", "", "Override IP address for the upstream server (e.g., 1.2.3.4)")
   flag.StringVar(&cfg.AuthToken, "token", "", "Authentication token for the upstream server")
   flag.IntVar(&cfg.Version, "version", 2, "Protocol version to use (1 or 2)")
-  flag.StringVar(&cfg.HTTPVersion, "http-version", "auto", "HTTP version to use (auto, h2, h2c, h3)")
+  flag.StringVar(&cfg.HTTPVersion, "http-version", "auto", "HTTP version for both POST and GET (auto, h2, h2c, h3)")
+  flag.StringVar(&cfg.HTTPVersionPOST, "http-version-post", "", "HTTP version for POST/upload (overrides -http-version)")
+  flag.StringVar(&cfg.HTTPVersionGET, "http-version-get", "", "HTTP version for GET/download (overrides -http-version)")
   flag.BoolVar(&cfg.InsecureSkipVerify, "insecure", true, "Skip TLS certificate verification")
   flag.DurationVar(&cfg.ConnTimeout, "conn-timeout", 10*time.Second, "Connection timeout")
   flag.DurationVar(&cfg.StreamTimeout, "stream-timeout", 0, "Stream timeout (0 = no timeout)")
