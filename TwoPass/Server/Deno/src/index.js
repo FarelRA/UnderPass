@@ -12,11 +12,7 @@ const STATUS_UNAUTHORIZED = 401;
 const STATUS_METHOD_NOT_ALLOWED = 405;
 const STATUS_BAD_GATEWAY = 502;
 
-// Session configuration
-const SESSION_TTL_MS = 60000; // 60 seconds
-
 const sessions = new Map();
-const sessionTimers = new Map();
 
 console.log(`[*] TCP Tunnel Server starting on ${HOSTNAME}:${PORT}`);
 
@@ -27,6 +23,8 @@ class TCPSession {
   constructor() {
     this.socket = null;
     this.ready = null;
+    this.postDone = false;
+    this.getDone = false;
   }
 
   /**
@@ -129,7 +127,7 @@ class TCPSession {
  * @returns {Response} HTTP response with bidirectional stream
  */
 async function handleV1(request, targetHost, targetPort) {
-  const requestId = crypto.randomUUID().substring(0, 8);
+  const requestId = Math.random().toString(36).substring(2, 8);
   console.log(`[>] [v1] [${requestId}] Proxy request for ${targetHost}:${targetPort}`);
 
   try {
@@ -152,31 +150,6 @@ async function handleV1(request, targetHost, targetPort) {
   }
 }
 
-/**
- * Validates target hostname format
- * @param {string} targetHost - Target hostname to validate
- * @returns {boolean} True if valid
- */
-function isValidTargetHost(targetHost) {
-  if (!targetHost) return false;
-  // Allow: domain names, IPv4, IPv6 (with brackets)
-  return /^([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$|^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$|^\[[0-9a-f:]+\]$/i.test(targetHost);
-}
-
-/**
- * Cleanup expired session
- * @param {string} sessionId - Session ID to cleanup
- */
-function cleanupSession(sessionId) {
-  const session = sessions.get(sessionId);
-  if (session) {
-    session.cleanup(sessionId);
-    sessions.delete(sessionId);
-  }
-  sessionTimers.delete(sessionId);
-  console.log(`[-] [v2] [${sessionId}] Session expired and cleaned up`);
-}
-
 Deno.serve({
   hostname: HOSTNAME,
   port: PORT,
@@ -189,7 +162,7 @@ Deno.serve({
 
     // Validate target
     const targetHost = request.headers.get("X-Target-Host")?.toLowerCase().trim();
-    if (!isValidTargetHost(targetHost)) {
+    if (!targetHost || !/^[\w\-.:[\]]+$/.test(targetHost)) {
       console.log(`[!] Invalid target host: ${targetHost}`);
       return new Response("Invalid target host", { status: STATUS_BAD_REQUEST });
     }
@@ -206,26 +179,13 @@ Deno.serve({
     if (sessionId) {
       console.log(`[*] [v2] [${sessionId}] Request for session`);
 
-      // Get or create session
-      if (!sessions.has(sessionId)) {
-        sessions.set(sessionId, new TCPSession());
-        // Set TTL cleanup timer
-        const timer = setTimeout(() => cleanupSession(sessionId), SESSION_TTL_MS);
-        sessionTimers.set(sessionId, timer);
-      } else {
-        // Reset TTL timer on activity
-        clearTimeout(sessionTimers.get(sessionId));
-        const timer = setTimeout(() => cleanupSession(sessionId), SESSION_TTL_MS);
-        sessionTimers.set(sessionId, timer);
-      }
-
-      const session = sessions.get(sessionId);
+      const session = sessions.get(sessionId) || sessions.set(sessionId, new TCPSession()).get(sessionId);
 
       return session.handleRequest(request, sessionId).finally(() => {
-        if (request.method === "GET") {
-          // Clear timer and cleanup on GET completion
-          clearTimeout(sessionTimers.get(sessionId));
-          sessionTimers.delete(sessionId);
+        if (request.method === "POST") session.postDone = true;
+        if (request.method === "GET") session.getDone = true;
+        
+        if (session.postDone && session.getDone) {
           session.cleanup(sessionId);
           sessions.delete(sessionId);
           console.log(`[-] [v2] [${sessionId}] Session cleaned up`);
@@ -234,11 +194,11 @@ Deno.serve({
     }
 
     // V1: Single bidirectional stream
-    if (request.method !== "POST") {
-      console.log(`[!] [v1] Method not allowed: ${request.method}`);
-      return new Response("Method not allowed", { status: STATUS_METHOD_NOT_ALLOWED });
+    if (request.method === "POST") {
+      return handleV1(request, targetHost, targetPort);
     }
 
-    return handleV1(request, targetHost, targetPort);
+    console.log(`[!] [v1] Method not allowed: ${request.method}`);
+    return new Response("Method not allowed", { status: STATUS_METHOD_NOT_ALLOWED });
   },
 });
