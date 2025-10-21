@@ -1,10 +1,10 @@
-name: Cloudflare Workers Deploy
+name: TwoPass Cloudflare Workers Deploy
 
 on:
   push:
     branches: [ main ]
     paths:
-      - 'Server/Cloudflare/**'
+      - 'TwoPass/Server/Cloudflare/**'
       - '.github/workflows/cloudflare-deploy.yml'
   workflow_dispatch:
 
@@ -21,11 +21,11 @@ jobs:
           node-version: '20'
       
       - name: Install dependencies
-        working-directory: ./Server/Cloudflare
+        working-directory: ./TwoPass/Server/Cloudflare
         run: npm install
       
       - name: Run ESLint
-        working-directory: ./Server/Cloudflare
+        working-directory: ./TwoPass/Server/Cloudflare
         run: npx eslint src/ || true
 
   deploy:
@@ -41,4 +41,4 @@ jobs:
         with:
           apiToken: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           accountId: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-          workingDirectory: ./Server/Cloudflare
+          workingDirectory: ./TwoPass/Server/Cloudflare
