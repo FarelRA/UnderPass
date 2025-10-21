@@ -437,6 +437,7 @@ func (p *Proxy) setTunnelHeaders(req *http.Request, targetHost, targetPort, sess
   req.Header.Set("X-Target-Host", targetHost)
   req.Header.Set("X-Target-Port", targetPort)
   req.Header.Set("Content-Type", "application/grpc")
+  req.Header.Set("Cache-Control", "no-cache")
   if sessionID != "" {
     req.Header.Set("X-Session-ID", sessionID)
   }
