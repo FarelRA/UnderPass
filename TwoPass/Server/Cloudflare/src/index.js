@@ -8,9 +8,6 @@ const STATUS_UNAUTHORIZED = 401;
 const STATUS_METHOD_NOT_ALLOWED = 405;
 const STATUS_BAD_GATEWAY = 502;
 
-// Socket configuration
-const SOCKET_TIMEOUT_MS = 30000; // 30 seconds
-
 /**
  * TCPSession Durable Object for managing persistent TCP connections across V2 requests
  */
