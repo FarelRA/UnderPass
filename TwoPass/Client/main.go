@@ -6,6 +6,7 @@ import (
   "crypto/tls"
   "errors"
   "flag"
+  "fmt"
   "io"
   "log"
   "math/rand"
@@ -21,6 +22,9 @@ import (
   "golang.org/x/net/http2"
 )
 
+// Version is set via ldflags during build
+var Version = "dev"
+
 // Constants for structured logging prefixes
 const (
   logPrefixInfo    = "[*]"
@@ -34,12 +38,15 @@ const (
 
 // Config holds the client's configuration.
 type Config struct {
-  ListenAddr      string
-  UpstreamURLPOST string
-  UpstreamURLGET  string
-  UpstreamAddr    string
-  AuthToken       string
-  Version         int
+  ListenAddr         string
+  UpstreamURLPOST    string
+  UpstreamURLGET     string
+  UpstreamAddr       string
+  AuthToken          string
+  Version            int
+  InsecureSkipVerify bool
+  ConnTimeout        time.Duration
+  StreamTimeout      time.Duration
 }
 
 // Proxy holds the state and configuration for our proxy server.
@@ -50,10 +57,17 @@ type Proxy struct {
 }
 
 // NewProxy creates and initializes a new Proxy instance.
-func NewProxy(cfg Config) *Proxy {
-  parsedPOST, _ := url.Parse(cfg.UpstreamURLPOST)
-  parsedGET, _ := url.Parse(cfg.UpstreamURLGET)
-  dialer := &net.Dialer{Timeout: 5 * time.Second}
+func NewProxy(cfg Config) (*Proxy, error) {
+  parsedPOST, err := url.Parse(cfg.UpstreamURLPOST)
+  if err != nil {
+    return nil, fmt.Errorf("invalid POST URL: %w", err)
+  }
+  parsedGET, err := url.Parse(cfg.UpstreamURLGET)
+  if err != nil {
+    return nil, fmt.Errorf("invalid GET URL: %w", err)
+  }
+
+  dialer := &net.Dialer{Timeout: cfg.ConnTimeout}
 
   // Extract ports from URLs
   postPort := parsedPOST.Port()
@@ -88,9 +102,12 @@ func NewProxy(cfg Config) *Proxy {
       },
       TLSClientConfig: &tls.Config{
         NextProtos:         []string{"h2"},
-        InsecureSkipVerify: true,
+        InsecureSkipVerify: cfg.InsecureSkipVerify,
       },
-      IdleConnTimeout: 120 * time.Second,
+      MaxIdleConns:        100,
+      MaxIdleConnsPerHost: 10,
+      MaxConnsPerHost:     10,
+      IdleConnTimeout:     120 * time.Second,
     }
   } else {
     log.Printf("%s Configuring POST client for H2C (HTTP/2 over cleartext)", logPrefixInfo)
@@ -115,7 +132,7 @@ func NewProxy(cfg Config) *Proxy {
       log.Printf("%s Configuring GET client for H3 (HTTP/3 over QUIC)", logPrefixInfo)
       h3Transport := &http3.Transport{
         TLSClientConfig: &tls.Config{
-          InsecureSkipVerify: true,
+          InsecureSkipVerify: cfg.InsecureSkipVerify,
         },
       }
       if cfg.UpstreamAddr != "" {
@@ -149,11 +166,13 @@ func NewProxy(cfg Config) *Proxy {
     config: cfg,
     httpClientPOST: &http.Client{
       Transport: transportPOST,
+      Timeout:   0, // No timeout for streaming
     },
     httpClientGET: &http.Client{
       Transport: transportGET,
+      Timeout:   0, // No timeout for streaming
     },
-  }
+  }, nil
 }
 
 // Start runs the HTTP proxy server.
@@ -213,33 +232,63 @@ func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
     targetHost = "[" + targetHost + "]"
   }
 
-  hijacker, _ := w.(http.Hijacker)
-  clientConn, _, _ := hijacker.Hijack()
-  clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+  hijacker, ok := w.(http.Hijacker)
+  if !ok {
+    log.Printf("%s [v1] Hijacking not supported", logPrefixError)
+    http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
+    return
+  }
 
-  postReq, _ := http.NewRequestWithContext(r.Context(), "POST", p.config.UpstreamURLPOST, clientConn)
+  clientConn, _, err := hijacker.Hijack()
+  if err != nil {
+    log.Printf("%s [v1] Failed to hijack connection: %v", logPrefixError, err)
+    http.Error(w, "Failed to hijack connection", http.StatusInternalServerError)
+    return
+  }
+  defer clientConn.Close()
+
+  if p.config.StreamTimeout > 0 {
+    clientConn.SetDeadline(time.Now().Add(p.config.StreamTimeout))
+  }
+
+  _, err = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+  if err != nil {
+    log.Printf("%s [v1] Failed to write CONNECT response: %v", logPrefixError, err)
+    return
+  }
+
+  ctx := r.Context()
+  if p.config.StreamTimeout > 0 {
+    var cancel context.CancelFunc
+    ctx, cancel = context.WithTimeout(ctx, p.config.StreamTimeout)
+    defer cancel()
+  }
+
+  postReq, err := http.NewRequestWithContext(ctx, "POST", p.config.UpstreamURLPOST, clientConn)
+  if err != nil {
+    log.Printf("%s [v1] Failed to create POST request: %v", logPrefixError, err)
+    return
+  }
   p.setTunnelHeaders(postReq, targetHost, targetPort, "")
 
   upstreamResp, err := p.httpClientPOST.Do(postReq)
   if err != nil {
     log.Printf("%s [v1] Failed to connect to upstream: %v", logPrefixError, err)
-    clientConn.Close()
     return
   }
   defer upstreamResp.Body.Close()
 
   if upstreamResp.StatusCode != http.StatusOK {
     log.Printf("%s [v1] Upstream returned status: %s", logPrefixError, upstreamResp.Status)
-    clientConn.Close()
     return
   }
   log.Printf("%s [v1] Upstream tunnel established", logPrefixTunnel)
 
-  _, err = io.Copy(clientConn, upstreamResp.Body)
+  buf := make([]byte, 128*1024)
+  _, err = io.CopyBuffer(clientConn, upstreamResp.Body, buf)
   if err != nil && !isExpectedError(err) {
     log.Printf("%s [v1] Stream error: %v", logPrefixError, err)
   }
-  clientConn.Close()
 
   log.Printf("%s [v1] Connection closed for %s", logPrefixClose, r.Host)
 }
@@ -259,18 +308,35 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
 
   hijacker, ok := w.(http.Hijacker)
   if !ok {
+    log.Printf("%s [v2] Hijacking not supported", logPrefixError)
     http.Error(w, "Hijacking not supported", http.StatusInternalServerError)
     return
   }
   clientConn, _, err := hijacker.Hijack()
   if err != nil {
+    log.Printf("%s [v2] Failed to hijack connection: %v", logPrefixError, err)
     http.Error(w, "Failed to hijack connection", http.StatusInternalServerError)
     return
   }
-  clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+
+  if p.config.StreamTimeout > 0 {
+    clientConn.SetDeadline(time.Now().Add(p.config.StreamTimeout))
+  }
+
+  _, err = clientConn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+  if err != nil {
+    log.Printf("%s [v2] Failed to write CONNECT response: %v", logPrefixError, err)
+    clientConn.Close()
+    return
+  }
 
   ctx, cancel := context.WithCancel(r.Context())
   defer cancel()
+
+  if p.config.StreamTimeout > 0 {
+    ctx, cancel = context.WithTimeout(ctx, p.config.StreamTimeout)
+    defer cancel()
+  }
 
   sessionID := generateSessionID()
   log.Printf("%s [v2] Generated Session ID: %s", logPrefixInfo, sessionID)
@@ -279,7 +345,10 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
   wg.Add(2)
 
   var closeOnce sync.Once
+  var connMutex sync.Mutex
   tunnelClose := func() {
+    connMutex.Lock()
+    defer connMutex.Unlock()
     clientConn.Close()
     cancel()
   }
@@ -288,7 +357,12 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
   go func() {
     defer wg.Done()
 
-    postReq, _ := http.NewRequestWithContext(ctx, "POST", p.config.UpstreamURLPOST, clientConn)
+    postReq, err := http.NewRequestWithContext(ctx, "POST", p.config.UpstreamURLPOST, clientConn)
+    if err != nil {
+      log.Printf("%s [v2] Failed to create POST request: %v", logPrefixError, err)
+      closeOnce.Do(tunnelClose)
+      return
+    }
     p.setTunnelHeaders(postReq, targetHost, targetPort, sessionID)
 
     postResp, err := p.httpClientPOST.Do(postReq)
@@ -316,7 +390,12 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
   go func() {
     defer wg.Done()
 
-    getReq, _ := http.NewRequestWithContext(ctx, "GET", p.config.UpstreamURLGET, nil)
+    getReq, err := http.NewRequestWithContext(ctx, "GET", p.config.UpstreamURLGET, nil)
+    if err != nil {
+      log.Printf("%s [v2] Failed to create GET request: %v", logPrefixError, err)
+      closeOnce.Do(tunnelClose)
+      return
+    }
     p.setTunnelHeaders(getReq, targetHost, targetPort, sessionID)
 
     getResp, err := p.httpClientGET.Do(getReq)
@@ -338,7 +417,10 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
     }
     log.Printf("%s [v2] Upstream GET tunnel established", logPrefixTunnel)
 
-    _, err = io.Copy(clientConn, getResp.Body)
+    buf := make([]byte, 128*1024)
+    connMutex.Lock()
+    _, err = io.CopyBuffer(clientConn, getResp.Body, buf)
+    connMutex.Unlock()
     if err != nil && !isExpectedError(err) {
       log.Printf("%s [v2] Stream error: %v", logPrefixError, err)
     }
@@ -383,6 +465,7 @@ func generateSessionID() string {
 func main() {
   cfg := Config{}
   var urlBoth string
+  var showVersion bool
   flag.StringVar(&cfg.ListenAddr, "listen", "127.0.0.1:8080", "Local address for the proxy to listen on")
   flag.StringVar(&urlBoth, "url", "", "URL for both POST and GET (shorthand)")
   flag.StringVar(&cfg.UpstreamURLPOST, "url-post", "", "URL for POST/upload (e.g., http://server.com/tunnel)")
@@ -390,7 +473,16 @@ func main() {
   flag.StringVar(&cfg.UpstreamAddr, "addr", "", "Override IP address for the upstream server (e.g., 1.2.3.4)")
   flag.StringVar(&cfg.AuthToken, "token", "", "Authentication token for the upstream server")
   flag.IntVar(&cfg.Version, "version", 2, "Protocol version to use (1 or 2)")
+  flag.BoolVar(&cfg.InsecureSkipVerify, "insecure", true, "Skip TLS certificate verification")
+  flag.DurationVar(&cfg.ConnTimeout, "conn-timeout", 10*time.Second, "Connection timeout")
+  flag.DurationVar(&cfg.StreamTimeout, "stream-timeout", 0, "Stream timeout (0 = no timeout)")
+  flag.BoolVar(&showVersion, "v", false, "Show version")
   flag.Parse()
+
+  if showVersion {
+    fmt.Printf("TwoPass Client %s\n", Version)
+    return
+  }
 
   if urlBoth != "" {
     if cfg.UpstreamURLPOST == "" {
@@ -410,8 +502,11 @@ func main() {
     log.Fatalf("%s Invalid protocol version specified. Must be 1 or 2.", logPrefixError)
   }
 
-  log.Printf("%s HTTP proxy server starting...", logPrefixInfo)
-  proxy := NewProxy(cfg)
+  log.Printf("%s HTTP proxy server starting... (version %s)", logPrefixInfo, Version)
+  proxy, err := NewProxy(cfg)
+  if err != nil {
+    log.Fatalf("%s Failed to create proxy: %v", logPrefixError, err)
+  }
   if err := proxy.Start(); err != nil {
     log.Fatalf("%s Failed to start proxy server: %v", logPrefixError, err)
   }
