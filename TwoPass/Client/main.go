@@ -44,6 +44,7 @@ type Config struct {
   UpstreamAddr       string
   AuthToken          string
   Version            int
+  HTTPVersion        string // "auto", "h2", "h2c", "h3"
   InsecureSkipVerify bool
   ConnTimeout        time.Duration
   StreamTimeout      time.Duration
@@ -88,9 +89,36 @@ func NewProxy(cfg Config) (*Proxy, error) {
     }
   }
 
-  // POST client (HTTP or HTTP/2)
+  // POST client configuration based on HTTPVersion
   var transportPOST http.RoundTripper
-  if parsedPOST.Scheme == "https" {
+  httpVersion := cfg.HTTPVersion
+  if httpVersion == "auto" {
+    if parsedPOST.Scheme == "https" {
+      httpVersion = "h2"
+    } else {
+      httpVersion = "h2c"
+    }
+  }
+
+  switch httpVersion {
+  case "h3":
+    log.Printf("%s Configuring POST client for H3 (HTTP/3 over QUIC)", logPrefixInfo)
+    h3Transport := &http3.Transport{
+      TLSClientConfig: &tls.Config{
+        InsecureSkipVerify: cfg.InsecureSkipVerify,
+      },
+    }
+    if cfg.UpstreamAddr != "" {
+      h3Transport.Dial = func(ctx context.Context, addr string, tlsCfg *tls.Config, quicCfg *quic.Config) (*quic.Conn, error) {
+        udpAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(cfg.UpstreamAddr, postPort))
+        if err != nil {
+          return nil, err
+        }
+        return quic.DialAddr(ctx, udpAddr.String(), tlsCfg, quicCfg)
+      }
+    }
+    transportPOST = h3Transport
+  case "h2":
     log.Printf("%s Configuring POST client for H2 (HTTP/2 over TLS)", logPrefixInfo)
     transportPOST = &http.Transport{
       ForceAttemptHTTP2: true,
@@ -109,7 +137,7 @@ func NewProxy(cfg Config) (*Proxy, error) {
       MaxConnsPerHost:     10,
       IdleConnTimeout:     120 * time.Second,
     }
-  } else {
+  case "h2c":
     log.Printf("%s Configuring POST client for H2C (HTTP/2 over cleartext)", logPrefixInfo)
     transportPOST = &http2.Transport{
       AllowHTTP: true,
@@ -117,7 +145,7 @@ func NewProxy(cfg Config) (*Proxy, error) {
         if cfg.UpstreamAddr != "" {
           addr = net.JoinHostPort(cfg.UpstreamAddr, postPort)
         } else {
-          addr = parsedPOST.Host
+          addr = net.JoinHostPort(parsedPOST.Hostname(), postPort)
         }
         return dialer.DialContext(ctx, network, addr)
       },
@@ -125,10 +153,20 @@ func NewProxy(cfg Config) (*Proxy, error) {
     }
   }
 
-  // GET client (HTTP/2 or HTTP/3) - only for V2
+  // GET client configuration for V2
   var transportGET http.RoundTripper
   if cfg.Version == 2 {
-    if parsedGET.Scheme == "https" {
+    getHTTPVersion := cfg.HTTPVersion
+    if getHTTPVersion == "auto" {
+      if parsedGET.Scheme == "https" {
+        getHTTPVersion = "h3"
+      } else {
+        getHTTPVersion = "h2c"
+      }
+    }
+
+    switch getHTTPVersion {
+    case "h3":
       log.Printf("%s Configuring GET client for H3 (HTTP/3 over QUIC)", logPrefixInfo)
       h3Transport := &http3.Transport{
         TLSClientConfig: &tls.Config{
@@ -145,7 +183,26 @@ func NewProxy(cfg Config) (*Proxy, error) {
         }
       }
       transportGET = h3Transport
-    } else {
+    case "h2":
+      log.Printf("%s Configuring GET client for H2 (HTTP/2 over TLS)", logPrefixInfo)
+      transportGET = &http.Transport{
+        ForceAttemptHTTP2: true,
+        DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+          if cfg.UpstreamAddr != "" {
+            addr = net.JoinHostPort(cfg.UpstreamAddr, getPort)
+          }
+          return dialer.DialContext(ctx, network, addr)
+        },
+        TLSClientConfig: &tls.Config{
+          NextProtos:         []string{"h2"},
+          InsecureSkipVerify: cfg.InsecureSkipVerify,
+        },
+        MaxIdleConns:        100,
+        MaxIdleConnsPerHost: 10,
+        MaxConnsPerHost:     10,
+        IdleConnTimeout:     120 * time.Second,
+      }
+    case "h2c":
       log.Printf("%s Configuring GET client for H2C (HTTP/2 over cleartext)", logPrefixInfo)
       transportGET = &http2.Transport{
         AllowHTTP: true,
@@ -153,7 +210,7 @@ func NewProxy(cfg Config) (*Proxy, error) {
           if cfg.UpstreamAddr != "" {
             addr = net.JoinHostPort(cfg.UpstreamAddr, getPort)
           } else {
-            addr = parsedGET.Host
+            addr = net.JoinHostPort(parsedGET.Hostname(), getPort)
           }
           return dialer.DialContext(ctx, network, addr)
         },
@@ -474,6 +531,7 @@ func main() {
   flag.StringVar(&cfg.UpstreamAddr, "addr", "", "Override IP address for the upstream server (e.g., 1.2.3.4)")
   flag.StringVar(&cfg.AuthToken, "token", "", "Authentication token for the upstream server")
   flag.IntVar(&cfg.Version, "version", 2, "Protocol version to use (1 or 2)")
+  flag.StringVar(&cfg.HTTPVersion, "http-version", "auto", "HTTP version to use (auto, h2, h2c, h3)")
   flag.BoolVar(&cfg.InsecureSkipVerify, "insecure", true, "Skip TLS certificate verification")
   flag.DurationVar(&cfg.ConnTimeout, "conn-timeout", 10*time.Second, "Connection timeout")
   flag.DurationVar(&cfg.StreamTimeout, "stream-timeout", 0, "Stream timeout (0 = no timeout)")
