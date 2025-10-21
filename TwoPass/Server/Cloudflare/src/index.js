@@ -13,8 +13,6 @@ const STATUS_BAD_GATEWAY = 502;
  */
 export class TCPSession {
   constructor(state, env) {
-    this.state = state;
-    this.env = env;
     this.socket = null;
     this.ready = null;
   }
