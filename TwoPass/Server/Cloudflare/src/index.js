@@ -67,7 +67,7 @@ async function handleV1(request, targetHost, targetPort, ctx) {
 
     console.log(`[<] [v1] Connected to ${targetHost}:${targetPort}`);
 
-    request.body.pipeTo(socket.writable, { preventClose: true }).catch(err => {
+    await request.body.pipeTo(socket.writable, { preventClose: true }).catch(err => {
       console.error(`[!] [v1] Upload stream error: ${err.message}`);
     });
 
