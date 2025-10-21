@@ -108,38 +108,40 @@ func NewProxy(cfg Config) *Proxy {
     }
   }
 
-  // GET client (HTTP/2 or HTTP/3)
+  // GET client (HTTP/2 or HTTP/3) - only for V2
   var transportGET http.RoundTripper
-  if parsedGET.Scheme == "https" {
-    log.Printf("%s Configuring GET client for H3 (HTTP/3 over QUIC)", logPrefixInfo)
-    h3Transport := &http3.Transport{
-      TLSClientConfig: &tls.Config{
-        InsecureSkipVerify: true,
-      },
-    }
-    if cfg.UpstreamAddr != "" {
-      h3Transport.Dial = func(ctx context.Context, addr string, tlsCfg *tls.Config, quicCfg *quic.Config) (*quic.Conn, error) {
-        udpAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(cfg.UpstreamAddr, getPort))
-        if err != nil {
-          return nil, err
-        }
-        return quic.DialAddr(ctx, udpAddr.String(), tlsCfg, quicCfg)
+  if cfg.Version == 2 {
+    if parsedGET.Scheme == "https" {
+      log.Printf("%s Configuring GET client for H3 (HTTP/3 over QUIC)", logPrefixInfo)
+      h3Transport := &http3.Transport{
+        TLSClientConfig: &tls.Config{
+          InsecureSkipVerify: true,
+        },
       }
-    }
-    transportGET = h3Transport
-  } else {
-    log.Printf("%s Configuring GET client for H2C (HTTP/2 over cleartext)", logPrefixInfo)
-    transportGET = &http2.Transport{
-      AllowHTTP: true,
-      DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
-        if cfg.UpstreamAddr != "" {
-          addr = net.JoinHostPort(cfg.UpstreamAddr, getPort)
-        } else {
-          addr = parsedGET.Host
+      if cfg.UpstreamAddr != "" {
+        h3Transport.Dial = func(ctx context.Context, addr string, tlsCfg *tls.Config, quicCfg *quic.Config) (*quic.Conn, error) {
+          udpAddr, err := net.ResolveUDPAddr("udp", net.JoinHostPort(cfg.UpstreamAddr, getPort))
+          if err != nil {
+            return nil, err
+          }
+          return quic.DialAddr(ctx, udpAddr.String(), tlsCfg, quicCfg)
         }
-        return dialer.DialContext(ctx, network, addr)
-      },
-      IdleConnTimeout: 120 * time.Second,
+      }
+      transportGET = h3Transport
+    } else {
+      log.Printf("%s Configuring GET client for H2C (HTTP/2 over cleartext)", logPrefixInfo)
+      transportGET = &http2.Transport{
+        AllowHTTP: true,
+        DialTLSContext: func(ctx context.Context, network, addr string, _ *tls.Config) (net.Conn, error) {
+          if cfg.UpstreamAddr != "" {
+            addr = net.JoinHostPort(cfg.UpstreamAddr, getPort)
+          } else {
+            addr = parsedGET.Host
+          }
+          return dialer.DialContext(ctx, network, addr)
+        },
+        IdleConnTimeout: 120 * time.Second,
+      }
     }
   }
 
@@ -157,8 +159,12 @@ func NewProxy(cfg Config) *Proxy {
 // Start runs the HTTP proxy server.
 func (p *Proxy) Start() error {
   log.Printf("%s Listening for connections on: %s", logPrefixInfo, p.config.ListenAddr)
-  log.Printf("%s POST (upload) to: %s", logPrefixInfo, p.config.UpstreamURLPOST)
-  log.Printf("%s GET (download) from: %s", logPrefixInfo, p.config.UpstreamURLGET)
+  if p.config.Version == 1 {
+    log.Printf("%s Tunnel URL: %s", logPrefixInfo, p.config.UpstreamURLPOST)
+  } else {
+    log.Printf("%s POST (upload) to: %s", logPrefixInfo, p.config.UpstreamURLPOST)
+    log.Printf("%s GET (download) from: %s", logPrefixInfo, p.config.UpstreamURLGET)
+  }
   log.Printf("%s Using protocol version: v%d", logPrefixInfo, p.config.Version)
   if p.config.UpstreamAddr != "" {
     log.Printf("%s Upstream address override is active: %s", logPrefixInfo, p.config.UpstreamAddr)
@@ -229,11 +235,10 @@ func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
   }
   log.Printf("%s [v1] Upstream tunnel established", logPrefixTunnel)
 
-  written, err := io.Copy(clientConn, upstreamResp.Body)
+  _, err = io.Copy(clientConn, upstreamResp.Body)
   if err != nil && !isExpectedError(err) {
     log.Printf("%s [v1] Stream error: %v", logPrefixError, err)
   }
-  log.Printf("%s [v1] Upstream -> Client copied %d bytes", logPrefixStream, written)
   clientConn.Close()
 
   log.Printf("%s [v1] Connection closed for %s", logPrefixClose, r.Host)
@@ -377,13 +382,24 @@ func generateSessionID() string {
 
 func main() {
   cfg := Config{}
+  var urlBoth string
   flag.StringVar(&cfg.ListenAddr, "listen", "127.0.0.1:8080", "Local address for the proxy to listen on")
+  flag.StringVar(&urlBoth, "url", "", "URL for both POST and GET (shorthand)")
   flag.StringVar(&cfg.UpstreamURLPOST, "url-post", "", "URL for POST/upload (e.g., http://server.com/tunnel)")
   flag.StringVar(&cfg.UpstreamURLGET, "url-get", "", "URL for GET/download (e.g., https://server.com/tunnel)")
   flag.StringVar(&cfg.UpstreamAddr, "addr", "", "Override IP address for the upstream server (e.g., 1.2.3.4)")
   flag.StringVar(&cfg.AuthToken, "token", "", "Authentication token for the upstream server")
   flag.IntVar(&cfg.Version, "version", 2, "Protocol version to use (1 or 2)")
   flag.Parse()
+
+  if urlBoth != "" {
+    if cfg.UpstreamURLPOST == "" {
+      cfg.UpstreamURLPOST = urlBoth
+    }
+    if cfg.UpstreamURLGET == "" {
+      cfg.UpstreamURLGET = urlBoth
+    }
+  }
 
   if cfg.UpstreamURLPOST == "" || cfg.UpstreamURLGET == "" || cfg.AuthToken == "" {
     flag.Usage()
