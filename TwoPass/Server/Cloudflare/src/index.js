@@ -147,17 +147,6 @@ async function handleV1(request, targetHost, targetPort, ctx) {
   }
 }
 
-/**
- * Validates target hostname format
- * @param {string} targetHost - Target hostname to validate
- * @returns {boolean} True if valid
- */
-function isValidTargetHost(targetHost) {
-  if (!targetHost) return false;
-  // Allow: domain names, IPv4, IPv6 (with brackets)
-  return /^([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$|^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$|^\[[0-9a-f:]+\]$/i.test(targetHost);
-}
-
 export default {
   async fetch(request, env, ctx) {
     // Validate authentication
@@ -169,7 +158,7 @@ export default {
 
     // Validate target
     const targetHost = request.headers.get('X-Target-Host')?.toLowerCase().trim();
-    if (!isValidTargetHost(targetHost)) {
+    if (!targetHost || !/^([a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?\.)*[a-z0-9]([a-z0-9\-]{0,61}[a-z0-9])?$|^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$|^\[[0-9a-f:]+\]$/i.test(targetHost)) {
       console.log(`[!] Invalid target host: ${targetHost}`);
       return new Response('Invalid target host', { status: STATUS_BAD_REQUEST });
     }
