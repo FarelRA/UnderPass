@@ -59,6 +59,8 @@ class TCPSession {
    * @returns {Response} HTTP response
    */
   async handleRequest(request, targetHost, targetPort, sessionId) {
+    console.log(`[*] [v2] [${sessionId}] Request for session`);
+
     // Try connect to the target
     try {
       await this.connect(targetHost, targetPort, sessionId);
@@ -153,7 +155,6 @@ Deno.serve({
 
     // V2: Decoupled streams (POST + GET)
     if (sessionId) {
-      console.log(`[*] [v2] [${sessionId}] Request for session`);
       const session = sessions.get(sessionId)
         || sessions.set(sessionId, new TCPSession()).get(sessionId);
       return session.handleRequest(request, targetHost, targetPort, sessionId);
