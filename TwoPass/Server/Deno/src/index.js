@@ -3,13 +3,20 @@ const PASSWORD = Deno.env.get('PASSWORD');
 const HOSTNAME = Deno.env.get('HOSTNAME') || '0.0.0.0';
 const PORT = parseInt(Deno.env.get('PORT') || '8080', 10);
 
-// HTTP Status codes
-const STATUS_OK = 200;
-const STATUS_CREATED = 201;
-const STATUS_BAD_REQUEST = 400;
-const STATUS_UNAUTHORIZED = 401;
-const STATUS_METHOD_NOT_ALLOWED = 405;
-const STATUS_BAD_GATEWAY = 502;
+const STATUS = {
+  OK: 200,
+  CREATED: 201,
+  BAD_REQUEST: 400,
+  UNAUTHORIZED: 401,
+  METHOD_NOT_ALLOWED: 405,
+  BAD_GATEWAY: 502,
+};
+
+const HEADERS = {
+  'Content-Type': 'application/grpc',
+  'Cache-Control': 'no-cache',
+};
+
 const sessions = new Map();
 
 /**
@@ -51,14 +58,12 @@ class TCPSession {
    * @param {string} sessionId - Session ID
    * @returns {Response} HTTP response
    */
-  async handleRequest(request, sessionId) {
-    const targetHost = request.headers.get('X-Target-Host')?.toLowerCase().trim();
-    const targetPort = parseInt(request.headers.get('X-Target-Port'), 10);
-
+  async handleRequest(request, targetHost, targetPort, sessionId) {
+    // Try connect to the target
     try {
       await this.connect(targetHost, targetPort, sessionId);
     } catch (err) {
-      return new Response('Connection failed', { status: STATUS_BAD_GATEWAY });
+      return new Response('Connection failed', { status: STATUS.BAD_GATEWAY });
     }
 
     // POST: Upload (Client -> Target)
@@ -67,15 +72,12 @@ class TCPSession {
       try {
         await request.body.pipeTo(this.socket.writable, { preventClose: true });
         return new Response(null, {
-          status: STATUS_CREATED,
-          headers: {
-            'Content-Type': 'application/grpc',
-            'Cache-Control': 'no-cache',
-          }
+          status: STATUS.CREATED,
+          headers: HEADERS,
         });
       } catch (err) {
         console.error(`[!] [v2] [${sessionId}] Upload error: ${err.message}`);
-        return new Response('Upload failed', { status: STATUS_BAD_GATEWAY });
+        return new Response('Upload failed', { status: STATUS.BAD_GATEWAY });
       }
     }
 
@@ -83,14 +85,11 @@ class TCPSession {
     if (request.method === 'GET') {
       console.log(`[=] [v2] [${sessionId}] Download starting`);
       return new Response(this.socket.readable, {
-        headers: {
-          'Content-Type': 'application/grpc',
-          'Cache-Control': 'no-cache',
-        }
+        headers: HEADERS,
       });
     }
 
-    return new Response('Method not allowed', { status: STATUS_METHOD_NOT_ALLOWED });
+    return new Response('Method not allowed', { status: STATUS.METHOD_NOT_ALLOWED });
   }
 }
 
@@ -118,14 +117,11 @@ async function handleV1(request, targetHost, targetPort) {
     });
 
     return new Response(socket.readable, {
-      headers: {
-        'Content-Type': 'application/grpc',
-        'Cache-Control': 'no-cache',
-      },
+      headers: HEADERS,
     });
   } catch (err) {
     console.error(`[!] [v1] [${requestId}] Connection failed: ${err.message}`);
-    return new Response('Connection failed', { status: STATUS_BAD_GATEWAY });
+    return new Response('Connection failed', { status: STATUS.BAD_GATEWAY });
   }
 }
 
@@ -135,23 +131,22 @@ Deno.serve({
   port: PORT,
   handler(request) {
     // Validate authentication
-    const authHeader = request.headers.get('Authorization');
-    if (authHeader !== `Basic ${PASSWORD}`) {
+    if (request.headers.get('Authorization') !== `Basic ${PASSWORD}`) {
       console.log('[!] Unauthorized request');
-      return new Response('Unauthorized', { status: STATUS_UNAUTHORIZED });
+      return new Response('Unauthorized', { status: STATUS.UNAUTHORIZED });
     }
 
     // Validate target
     const targetHost = request.headers.get('X-Target-Host')?.toLowerCase().trim();
     if (!targetHost || !/^[\w\-.:[\]]+$/.test(targetHost)) {
       console.log(`[!] Invalid target host: ${targetHost}`);
-      return new Response('Invalid target host', { status: STATUS_BAD_REQUEST });
+      return new Response('Invalid target host', { status: STATUS.BAD_REQUEST });
     }
 
     const targetPort = parseInt(request.headers.get('X-Target-Port'), 10);
     if (!targetPort || targetPort < 1 || targetPort > 65535) {
       console.log(`[!] Invalid target port: ${targetPort}`);
-      return new Response('Invalid target port', { status: STATUS_BAD_REQUEST });
+      return new Response('Invalid target port', { status: STATUS.BAD_REQUEST });
     }
 
     const sessionId = request.headers.get('X-Session-ID');
@@ -161,7 +156,7 @@ Deno.serve({
       console.log(`[*] [v2] [${sessionId}] Request for session`);
       const session = sessions.get(sessionId)
         || sessions.set(sessionId, new TCPSession()).get(sessionId);
-      return session.handleRequest(request, sessionId);
+      return session.handleRequest(request, targetHost, targetPort, sessionId);
     }
 
     // V1: Single bidirectional stream
@@ -170,6 +165,6 @@ Deno.serve({
     }
 
     console.log(`[!] [v1] Method not allowed: ${request.method}`);
-    return new Response('Method not allowed', { status: STATUS_METHOD_NOT_ALLOWED });
+    return new Response('Method not allowed', { status: STATUS.METHOD_NOT_ALLOWED });
   },
 });
