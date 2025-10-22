@@ -350,8 +350,10 @@ func (p *Proxy) handleV2Upload(ctx context.Context, clientConn net.Conn, targetH
 	p.setTunnelHeaders(postReq, targetHost, targetPort, sessionID)
 
 	postResp, err := p.httpClientPOST.Do(postReq)
-	if err != nil && !isExpectedError(err) {
-		log.Printf("%s [%s] POST request failed: %v", logPrefixError, protocolV2, err)
+	if err != nil {
+		if !isExpectedError(err) {
+			log.Printf("%s [%s] POST request failed: %v", logPrefixError, protocolV2, err)
+		}
 		closeOnce.Do(tunnelClose)
 		return
 	}
@@ -376,8 +378,10 @@ func (p *Proxy) handleV2Download(ctx context.Context, clientConn net.Conn, targe
 	p.setTunnelHeaders(getReq, targetHost, targetPort, sessionID)
 
 	getResp, err := p.httpClientGET.Do(getReq)
-	if err != nil && !isExpectedError(err) {
-		log.Printf("%s [%s] GET request failed: %v", logPrefixError, protocolV2, err)
+	if err != nil {
+		if !isExpectedError(err) {
+			log.Printf("%s [%s] GET request failed: %v", logPrefixError, protocolV2, err)
+		}
 		closeOnce.Do(tunnelClose)
 		return
 	}
