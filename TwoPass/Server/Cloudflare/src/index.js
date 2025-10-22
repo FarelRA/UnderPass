@@ -61,7 +61,7 @@ export class TCPSession {
     if (request.method === 'POST') {
       console.log(`[=] [v2] [${sessionId}] Upload starting`);
       try {
-        request.body.pipeTo(this.socket.writable, { preventClose: true });
+        await request.body.pipeTo(this.socket.writable, { preventClose: true });
         return new Response(null, {
           status: STATUS_CREATED,
           headers: {
