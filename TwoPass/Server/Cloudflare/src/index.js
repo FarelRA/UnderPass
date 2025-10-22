@@ -71,7 +71,6 @@ export class TCPSession {
         });
       } catch (err) {
         console.error(`[!] [v2] [${sessionId}] Upload error: ${err.message}`);
-        this.cleanup(sessionId);
         return new Response('Upload failed', { status: STATUS_BAD_GATEWAY });
       }
     }
@@ -88,23 +87,6 @@ export class TCPSession {
     }
 
     return new Response('Method not allowed', { status: STATUS_METHOD_NOT_ALLOWED });
-  }
-
-  /**
-   * Cleanup socket resources
-   * @param {string} sessionId - Session ID for logging
-   */
-  cleanup(sessionId) {
-    if (this.socket) {
-      try {
-        this.socket.close();
-        console.log(`[-] [v2] [${sessionId}] Socket cleaned up`);
-      } catch (err) {
-        console.error(`[!] [v2] [${sessionId}] Cleanup error: ${err.message}`);
-      }
-      this.socket = null;
-      this.ready = null;
-    }
   }
 }
 
