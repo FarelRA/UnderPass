@@ -228,19 +228,18 @@ func (p *Proxy) dispatchRequest(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
-	version := protocolV1
-	log.Printf("%s [%s] Proxy request for %s", logPrefixRequest, version, r.Host)
+	log.Printf("%s [%s] Proxy request for %s", logPrefixRequest, protocolV1, r.Host)
 
 	targetHost, targetPort, err := parseAndFormatTarget(r.Host)
 	if err != nil {
-		log.Printf("%s [%s] Invalid target host format: %s", logPrefixError, version, r.Host)
+		log.Printf("%s [%s] Invalid target host format: %s", logPrefixError, protocolV1, r.Host)
 		http.Error(w, "Invalid target host format", http.StatusBadRequest)
 		return
 	}
 
 	clientConn, err := hijackAndRespond(w, p.config.StreamTimeout)
 	if err != nil {
-		log.Printf("%s [%s] Hijack failed: %v", logPrefixError, version, err)
+		log.Printf("%s [%s] Hijack failed: %v", logPrefixError, protocolV1, err)
 		return
 	}
 	defer clientConn.Close()
@@ -254,31 +253,31 @@ func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
 
 	postReq, err := http.NewRequestWithContext(ctx, "POST", p.config.UpstreamURLPOST, clientConn)
 	if err != nil {
-		log.Printf("%s [%s] Failed to create POST request: %v", logPrefixError, version, err)
+		log.Printf("%s [%s] Failed to create POST request: %v", logPrefixError, protocolV1, err)
 		return
 	}
 	p.setTunnelHeaders(postReq, targetHost, targetPort, "")
 
 	upstreamResp, err := p.httpClientPOST.Do(postReq)
 	if err != nil {
-		log.Printf("%s [%s] Failed to connect to upstream: %v", logPrefixError, version, err)
+		log.Printf("%s [%s] Failed to connect to upstream: %v", logPrefixError, protocolV1, err)
 		return
 	}
 	defer upstreamResp.Body.Close()
 
 	if upstreamResp.StatusCode != http.StatusOK {
-		log.Printf("%s [%s] Upstream returned status: %s", logPrefixError, version, upstreamResp.Status)
+		log.Printf("%s [%s] Upstream returned status: %s", logPrefixError, protocolV1, upstreamResp.Status)
 		return
 	}
-	log.Printf("%s [%s] Upstream tunnel established", logPrefixTunnel, version)
+	log.Printf("%s [%s] Upstream tunnel established", logPrefixTunnel, protocolV1)
 
 	buf := make([]byte, bufferSize)
 	_, err = io.CopyBuffer(clientConn, upstreamResp.Body, buf)
 	if err != nil && !isExpectedError(err) {
-		log.Printf("%s [%s] Stream error: %v", logPrefixError, version, err)
+		log.Printf("%s [%s] Stream error: %v", logPrefixError, protocolV1, err)
 	}
 
-	log.Printf("%s [%s] Connection closed for %s", logPrefixClose, version, r.Host)
+	log.Printf("%s [%s] Connection closed for %s", logPrefixClose, protocolV1, r.Host)
 }
 
 // ============================================================================
@@ -286,19 +285,18 @@ func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
-	version := protocolV2
-	log.Printf("%s [%s] Proxy request for %s", logPrefixRequest, version, r.Host)
+	log.Printf("%s [%s] Proxy request for %s", logPrefixRequest, protocolV2, r.Host)
 
 	targetHost, targetPort, err := parseAndFormatTarget(r.Host)
 	if err != nil {
-		log.Printf("%s [%s] Invalid CONNECT host: %s", logPrefixError, version, r.Host)
+		log.Printf("%s [%s] Invalid CONNECT host: %s", logPrefixError, protocolV2, r.Host)
 		http.Error(w, "Invalid target host format", http.StatusBadRequest)
 		return
 	}
 
 	clientConn, err := hijackAndRespond(w, p.config.StreamTimeout)
 	if err != nil {
-		log.Printf("%s [%s] Hijack failed: %v", logPrefixError, version, err)
+		log.Printf("%s [%s] Hijack failed: %v", logPrefixError, protocolV2, err)
 		return
 	}
 
@@ -311,7 +309,7 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
 	}
 
 	sessionID := generateSessionID()
-	log.Printf("%s [%s] Generated Session ID: %s", logPrefixInfo, version, sessionID)
+	log.Printf("%s [%s] Generated Session ID: %s", logPrefixInfo, protocolV2, sessionID)
 
 	var wg sync.WaitGroup
 	var closeOnce sync.Once
@@ -328,24 +326,24 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		p.handleV2Upload(ctx, clientConn, targetHost, targetPort, sessionID, version, &closeOnce, tunnelClose)
+		p.handleV2Upload(ctx, clientConn, targetHost, targetPort, sessionID, protocolV2, &closeOnce, tunnelClose)
 	}()
 
 	// GET goroutine
 	wg.Add(1)
 	go func() {
 		defer wg.Done()
-		p.handleV2Download(ctx, clientConn, targetHost, targetPort, sessionID, version, &connMutex, &closeOnce, tunnelClose)
+		p.handleV2Download(ctx, clientConn, targetHost, targetPort, sessionID, protocolV2, &connMutex, &closeOnce, tunnelClose)
 	}()
 
 	wg.Wait()
-	log.Printf("%s [%s] Connection closed for %s", logPrefixClose, version, r.Host)
+	log.Printf("%s [%s] Connection closed for %s", logPrefixClose, protocolV2, r.Host)
 }
 
-func (p *Proxy) handleV2Upload(ctx context.Context, clientConn net.Conn, targetHost, targetPort, sessionID, version string, closeOnce *sync.Once, tunnelClose func()) {
+func (p *Proxy) handleV2Upload(ctx context.Context, clientConn net.Conn, targetHost, targetPort, sessionID, protocolV2 string, closeOnce *sync.Once, tunnelClose func()) {
 	postReq, err := http.NewRequestWithContext(ctx, "POST", p.config.UpstreamURLPOST, clientConn)
 	if err != nil {
-		log.Printf("%s [%s] Failed to create POST request: %v", logPrefixError, version, err)
+		log.Printf("%s [%s] Failed to create POST request: %v", logPrefixError, protocolV2, err)
 		closeOnce.Do(tunnelClose)
 		return
 	}
@@ -353,25 +351,25 @@ func (p *Proxy) handleV2Upload(ctx context.Context, clientConn net.Conn, targetH
 
 	postResp, err := p.httpClientPOST.Do(postReq)
 	if err != nil && !isExpectedError(err) {
-		log.Printf("%s [%s] POST request failed: %v", logPrefixError, version, err)
+		log.Printf("%s [%s] POST request failed: %v", logPrefixError, protocolV2, err)
 		closeOnce.Do(tunnelClose)
 		return
 	}
 	defer postResp.Body.Close()
 
 	if postResp.StatusCode != http.StatusCreated {
-		log.Printf("%s [%s] Upstream POST failed with status: %s", logPrefixError, version, postResp.Status)
+		log.Printf("%s [%s] Upstream POST failed with status: %s", logPrefixError, protocolV2, postResp.Status)
 		closeOnce.Do(tunnelClose)
 		return
 	}
-	log.Printf("%s [%s] Upstream POST tunnel established", logPrefixTunnel, version)
+	log.Printf("%s [%s] Upstream POST tunnel established", logPrefixTunnel, protocolV2)
 	closeOnce.Do(tunnelClose)
 }
 
-func (p *Proxy) handleV2Download(ctx context.Context, clientConn net.Conn, targetHost, targetPort, sessionID, version string, connMutex *sync.Mutex, closeOnce *sync.Once, tunnelClose func()) {
+func (p *Proxy) handleV2Download(ctx context.Context, clientConn net.Conn, targetHost, targetPort, sessionID, protocolV2 string, connMutex *sync.Mutex, closeOnce *sync.Once, tunnelClose func()) {
 	getReq, err := http.NewRequestWithContext(ctx, "GET", p.config.UpstreamURLGET, nil)
 	if err != nil {
-		log.Printf("%s [%s] Failed to create GET request: %v", logPrefixError, version, err)
+		log.Printf("%s [%s] Failed to create GET request: %v", logPrefixError, protocolV2, err)
 		closeOnce.Do(tunnelClose)
 		return
 	}
@@ -379,25 +377,25 @@ func (p *Proxy) handleV2Download(ctx context.Context, clientConn net.Conn, targe
 
 	getResp, err := p.httpClientGET.Do(getReq)
 	if err != nil && !isExpectedError(err) {
-		log.Printf("%s [%s] GET request failed: %v", logPrefixError, version, err)
+		log.Printf("%s [%s] GET request failed: %v", logPrefixError, protocolV2, err)
 		closeOnce.Do(tunnelClose)
 		return
 	}
 	defer getResp.Body.Close()
 
 	if getResp.StatusCode != http.StatusOK {
-		log.Printf("%s [%s] Upstream GET failed with status: %s", logPrefixError, version, getResp.Status)
+		log.Printf("%s [%s] Upstream GET failed with status: %s", logPrefixError, protocolV2, getResp.Status)
 		closeOnce.Do(tunnelClose)
 		return
 	}
-	log.Printf("%s [%s] Upstream GET tunnel established", logPrefixTunnel, version)
+	log.Printf("%s [%s] Upstream GET tunnel established", logPrefixTunnel, protocolV2)
 
 	buf := make([]byte, bufferSize)
 	connMutex.Lock()
 	_, err = io.CopyBuffer(clientConn, getResp.Body, buf)
 	connMutex.Unlock()
 	if err != nil && !isExpectedError(err) {
-		log.Printf("%s [%s] Stream error: %v", logPrefixError, version, err)
+		log.Printf("%s [%s] Stream error: %v", logPrefixError, protocolV2, err)
 	}
 	closeOnce.Do(tunnelClose)
 }
