@@ -22,6 +22,10 @@ import (
 	"golang.org/x/net/http2"
 )
 
+// ============================================================================
+// Constants and Global Variables
+// ============================================================================
+
 var Version = "dev"
 
 const (
@@ -34,6 +38,10 @@ const (
 	logPrefixError   = "[!]"
 	bufferSize       = 128 * 1024
 )
+
+// ============================================================================
+// Types
+// ============================================================================
 
 type Config struct {
 	ListenAddr         string
@@ -55,29 +63,10 @@ type Proxy struct {
 	httpClientGET  *http.Client
 }
 
-// extractPort gets port from URL or returns default based on scheme
-func extractPort(u *url.URL) string {
-	if port := u.Port(); port != "" {
-		return port
-	}
-	if u.Scheme == "https" {
-		return "443"
-	}
-	return "80"
-}
+// ============================================================================
+// HTTP Transport Factory Functions
+// ============================================================================
 
-// autoDetectHTTPVersion returns h2/h2c for POST, h3/h2c for GET based on scheme
-func autoDetectHTTPVersion(scheme string, isGET bool) string {
-	if scheme == "https" {
-		if isGET {
-			return "h3"
-		}
-		return "h2"
-	}
-	return "h2c"
-}
-
-// createH3Transport creates HTTP/3 transport with optional address override
 func createH3Transport(cfg Config, overrideAddr, port string) *http3.Transport {
 	transport := &http3.Transport{
 		TLSClientConfig: &tls.Config{
@@ -96,7 +85,6 @@ func createH3Transport(cfg Config, overrideAddr, port string) *http3.Transport {
 	return transport
 }
 
-// createH2Transport creates HTTP/2 over TLS transport
 func createH2Transport(cfg Config, overrideAddr, port string, dialer *net.Dialer) *http.Transport {
 	return &http.Transport{
 		ForceAttemptHTTP2: true,
@@ -117,7 +105,6 @@ func createH2Transport(cfg Config, overrideAddr, port string, dialer *net.Dialer
 	}
 }
 
-// createH2CTransport creates HTTP/2 over cleartext transport
 func createH2CTransport(cfg Config, overrideAddr, hostname, port string, dialer *net.Dialer) *http2.Transport {
 	return &http2.Transport{
 		AllowHTTP: true,
@@ -133,7 +120,6 @@ func createH2CTransport(cfg Config, overrideAddr, hostname, port string, dialer 
 	}
 }
 
-// createTransport creates appropriate HTTP transport based on version
 func createTransport(cfg Config, parsedURL *url.URL, httpVersion string, isGET bool) http.RoundTripper {
 	port := extractPort(parsedURL)
 	dialer := &net.Dialer{Timeout: cfg.ConnTimeout}
@@ -162,6 +148,10 @@ func createTransport(cfg Config, parsedURL *url.URL, httpVersion string, isGET b
 		return nil
 	}
 }
+
+// ============================================================================
+// Proxy Constructor and Server
+// ============================================================================
 
 func NewProxy(cfg Config) (*Proxy, error) {
 	parsedPOST, err := url.Parse(cfg.UpstreamURLPOST)
@@ -206,6 +196,10 @@ func (p *Proxy) Start() error {
 	return server.ListenAndServe()
 }
 
+// ============================================================================
+// Request Dispatcher
+// ============================================================================
+
 func (p *Proxy) dispatchRequest(w http.ResponseWriter, r *http.Request) {
 	log.Printf("%s Accepted connection from %s", logPrefixSuccess, r.RemoteAddr)
 
@@ -226,42 +220,9 @@ func (p *Proxy) dispatchRequest(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// parseAndFormatTarget parses host:port and formats IPv6 addresses
-func parseAndFormatTarget(hostPort string) (string, string, error) {
-	host, port, err := net.SplitHostPort(hostPort)
-	if err != nil {
-		return "", "", err
-	}
-	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil && host[0] != '[' {
-		host = "[" + host + "]"
-	}
-	return host, port, nil
-}
-
-// hijackAndRespond hijacks connection and sends 200 response
-func hijackAndRespond(w http.ResponseWriter, streamTimeout time.Duration) (net.Conn, error) {
-	hijacker, ok := w.(http.Hijacker)
-	if !ok {
-		return nil, errors.New("hijacking not supported")
-	}
-
-	conn, _, err := hijacker.Hijack()
-	if err != nil {
-		return nil, fmt.Errorf("failed to hijack: %w", err)
-	}
-
-	if streamTimeout > 0 {
-		conn.SetDeadline(time.Now().Add(streamTimeout))
-	}
-
-	_, err = conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
-	if err != nil {
-		conn.Close()
-		return nil, fmt.Errorf("failed to write response: %w", err)
-	}
-
-	return conn, nil
-}
+// ============================================================================
+// V1 Protocol Handler
+// ============================================================================
 
 func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
 	version := "v1"
@@ -316,6 +277,10 @@ func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
 
 	log.Printf("%s [%s] Connection closed for %s", logPrefixClose, version, r.Host)
 }
+
+// ============================================================================
+// V2 Protocol Handlers
+// ============================================================================
 
 func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
 	version := "v2"
@@ -442,6 +407,65 @@ func (p *Proxy) handleV2Download(ctx context.Context, clientConn net.Conn, targe
 	closeOnce.Do(tunnelClose)
 }
 
+// ============================================================================
+// Helper Functions
+// ============================================================================
+
+func extractPort(u *url.URL) string {
+	if port := u.Port(); port != "" {
+		return port
+	}
+	if u.Scheme == "https" {
+		return "443"
+	}
+	return "80"
+}
+
+func autoDetectHTTPVersion(scheme string, isGET bool) string {
+	if scheme == "https" {
+		if isGET {
+			return "h3"
+		}
+		return "h2"
+	}
+	return "h2c"
+}
+
+func parseAndFormatTarget(hostPort string) (string, string, error) {
+	host, port, err := net.SplitHostPort(hostPort)
+	if err != nil {
+		return "", "", err
+	}
+	if ip := net.ParseIP(host); ip != nil && ip.To4() == nil && host[0] != '[' {
+		host = "[" + host + "]"
+	}
+	return host, port, nil
+}
+
+func hijackAndRespond(w http.ResponseWriter, streamTimeout time.Duration) (net.Conn, error) {
+	hijacker, ok := w.(http.Hijacker)
+	if !ok {
+		return nil, errors.New("hijacking not supported")
+	}
+
+	conn, _, err := hijacker.Hijack()
+	if err != nil {
+		return nil, fmt.Errorf("failed to hijack: %w", err)
+	}
+
+	if streamTimeout > 0 {
+		conn.SetDeadline(time.Now().Add(streamTimeout))
+	}
+
+	_, err = conn.Write([]byte("HTTP/1.1 200 Connection Established\r\n\r\n"))
+	if err != nil {
+		conn.Close()
+		return nil, fmt.Errorf("failed to write response: %w", err)
+	}
+
+	return conn, nil
+}
+
 func (p *Proxy) setTunnelHeaders(req *http.Request, targetHost, targetPort, sessionID string) {
 	req.Header.Set("Authorization", "Basic "+p.config.AuthToken)
 	req.Header.Set("X-Target-Host", targetHost)
@@ -470,6 +494,10 @@ func generateSessionID() string {
 	}
 	return string(b)
 }
+
+// ============================================================================
+// Main Entry Point
+// ============================================================================
 
 func main() {
 	cfg := Config{}
