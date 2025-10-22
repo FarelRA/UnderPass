@@ -501,20 +501,29 @@ func main() {
 	var urlBoth, httpVersionBoth string
 	var showVersion bool
 
-	flag.StringVar(&cfg.ListenAddr, "listen", "127.0.0.1:8080", "Local address for the proxy to listen on")
-	flag.StringVar(&urlBoth, "url", "", "URL for both POST/upload and GET/download")
-	flag.StringVar(&cfg.UpstreamURLPOST, "url-post", "", "URL for POST/upload (e.g., http://server.com/tunnel)")
-	flag.StringVar(&cfg.UpstreamURLGET, "url-get", "", "URL for GET/download (e.g., https://server.com/tunnel)")
-	flag.StringVar(&cfg.UpstreamAddr, "addr", "", "Override IP address for the upstream server (e.g., 1.2.3.4)")
-	flag.StringVar(&cfg.AuthToken, "token", "", "Authentication token for the upstream server")
-	flag.IntVar(&cfg.Version, "version", 2, "Protocol version to use (1 or 2)")
-	flag.StringVar(&httpVersionBoth, "http", "auto", "HTTP version for both POST and GET")
-	flag.StringVar(&cfg.HTTPVersionPOST, "http-post", "", "HTTP version for POST/upload (auto, h2, h2c, h3)")
-	flag.StringVar(&cfg.HTTPVersionGET, "http-get", "", "HTTP version for GET/download (auto, h2, h2c, h3)")
+	// Server Configuration
+	flag.StringVar(&cfg.ListenAddr, "listen", "127.0.0.1:8080", "Local proxy listen address (host:port)")
+	flag.IntVar(&cfg.Version, "version", 2, "Protocol version: 1 (single stream) or 2 (dual stream)")
+
+	// Upstream Server Configuration
+	flag.StringVar(&urlBoth, "url", "", "Upstream URL for both POST and GET (shorthand)")
+	flag.StringVar(&cfg.UpstreamURLPOST, "url-post", "", "Upstream URL for POST/upload stream")
+	flag.StringVar(&cfg.UpstreamURLGET, "url-get", "", "Upstream URL for GET/download stream")
+	flag.StringVar(&cfg.UpstreamAddr, "addr", "", "Override upstream IP address (bypasses DNS)")
+	flag.StringVar(&cfg.AuthToken, "token", "", "Authentication token (required)")
+
+	// HTTP Protocol Configuration
+	flag.StringVar(&httpVersionBoth, "http", "auto", "HTTP version for both streams: auto, h2, h2c, h3")
+	flag.StringVar(&cfg.HTTPVersionPOST, "http-post", "", "HTTP version for POST stream (overrides -http)")
+	flag.StringVar(&cfg.HTTPVersionGET, "http-get", "", "HTTP version for GET stream (overrides -http)")
+
+	// Connection Settings
 	flag.BoolVar(&cfg.InsecureSkipVerify, "insecure", true, "Skip TLS certificate verification")
-	flag.DurationVar(&cfg.ConnTimeout, "conn-timeout", 10*time.Second, "Connection timeout")
-	flag.DurationVar(&cfg.StreamTimeout, "stream-timeout", 0, "Stream timeout (0 = no timeout)")
-	flag.BoolVar(&showVersion, "v", false, "Show version")
+	flag.DurationVar(&cfg.ConnTimeout, "conn-timeout", 10*time.Second, "TCP connection timeout")
+	flag.DurationVar(&cfg.StreamTimeout, "stream-timeout", 0, "Stream timeout (0 = unlimited)")
+
+	// Misc
+	flag.BoolVar(&showVersion, "v", false, "Show version and exit")
 	flag.Parse()
 
 	if showVersion {
