@@ -53,6 +53,8 @@ export class TCPSession {
    * @returns {Response} HTTP response
    */
   async fetch(request, targetHost, targetPort, sessionId) {
+    console.log(`[*] [v2] [${sessionId}] Request for session`);
+
     // Try connect to the target
     try {
       await this.connect(targetHost, targetPort, sessionId);
@@ -147,7 +149,6 @@ export default {
 
     // V2: Decoupled streams (POST + GET)
     if (sessionId) {
-      console.log(`[*] [v2] [${sessionId}] Request for session`);
       const id = env.TCP_SESSION.idFromName(sessionId);
       const stub = env.TCP_SESSION.get(id);
       return stub.fetch(request, targetHost, targetPort, sessionId);

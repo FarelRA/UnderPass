@@ -39,16 +39,16 @@ const (
 // Config holds the client's configuration.
 type Config struct {
   ListenAddr         string
+  UpstreamAddr       string
   UpstreamURLPOST    string
   UpstreamURLGET     string
-  UpstreamAddr       string
+  HTTPVersionPOST    string
+  HTTPVersionGET     string
   AuthToken          string
-  Version            int
-  HTTPVersionPOST    string // POST-specific
-  HTTPVersionGET     string // GET-specific
-  InsecureSkipVerify bool
   ConnTimeout        time.Duration
   StreamTimeout      time.Duration
+  InsecureSkipVerify bool
+  Version            int
 }
 
 // Proxy holds the state and configuration for our proxy server.
