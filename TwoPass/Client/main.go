@@ -47,17 +47,24 @@ const (
 // ============================================================================
 
 type Config struct {
-	ListenAddr         string
-	UpstreamAddr       string
-	UpstreamURLPOST    string
-	UpstreamURLGET     string
-	HTTPVersionPOST    string
-	HTTPVersionGET     string
-	AuthToken          string
+	// Server Configuration
+	ListenAddr string
+	Version    int
+
+	// Upstream Server Configuration
+	UpstreamURLPOST string
+	UpstreamURLGET  string
+	UpstreamAddr    string
+	AuthToken       string
+
+	// HTTP Protocol Configuration
+	HTTPVersionPOST string
+	HTTPVersionGET  string
+
+	// Connection Settings
+	InsecureSkipVerify bool
 	ConnTimeout        time.Duration
 	StreamTimeout      time.Duration
-	InsecureSkipVerify bool
-	Version            int
 }
 
 type Proxy struct {
