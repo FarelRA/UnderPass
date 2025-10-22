@@ -38,6 +38,8 @@ const (
 	logPrefixError   = "[!]"
 	bufferSize       = 128 * 1024
 	idleConnTimeout  = 120 * time.Second
+	protocolV1       = "v1"
+	protocolV2       = "v2"
 )
 
 // ============================================================================
@@ -226,7 +228,7 @@ func (p *Proxy) dispatchRequest(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
-	version := "v1"
+	version := protocolV1
 	log.Printf("%s [%s] Proxy request for %s", logPrefixRequest, version, r.Host)
 
 	targetHost, targetPort, err := parseAndFormatTarget(r.Host)
@@ -284,7 +286,7 @@ func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
 // ============================================================================
 
 func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
-	version := "v2"
+	version := protocolV2
 	log.Printf("%s [%s] Proxy request for %s", logPrefixRequest, version, r.Host)
 
 	targetHost, targetPort, err := parseAndFormatTarget(r.Host)
