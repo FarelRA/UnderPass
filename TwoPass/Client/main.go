@@ -37,6 +37,7 @@ const (
 	logPrefixClose   = "[-]"
 	logPrefixError   = "[!]"
 	bufferSize       = 128 * 1024
+	idleConnTimeout  = 120 * time.Second
 )
 
 // ============================================================================
@@ -101,7 +102,7 @@ func createH2Transport(cfg Config, overrideAddr, port string, dialer *net.Dialer
 		MaxIdleConns:        100,
 		MaxIdleConnsPerHost: 10,
 		MaxConnsPerHost:     10,
-		IdleConnTimeout:     120 * time.Second,
+		IdleConnTimeout:     idleConnTimeout,
 	}
 }
 
@@ -116,7 +117,7 @@ func createH2CTransport(cfg Config, overrideAddr, hostname, port string, dialer 
 			}
 			return dialer.DialContext(ctx, network, addr)
 		},
-		IdleConnTimeout: 120 * time.Second,
+		IdleConnTimeout: idleConnTimeout,
 	}
 }
 
@@ -237,7 +238,7 @@ func (p *Proxy) handleConnectV1(w http.ResponseWriter, r *http.Request) {
 
 	clientConn, err := hijackAndRespond(w, p.config.StreamTimeout)
 	if err != nil {
-		log.Printf("%s [%s] %v", logPrefixError, version, err)
+		log.Printf("%s [%s] Hijack failed: %v", logPrefixError, version, err)
 		return
 	}
 	defer clientConn.Close()
@@ -295,7 +296,7 @@ func (p *Proxy) handleConnectV2(w http.ResponseWriter, r *http.Request) {
 
 	clientConn, err := hijackAndRespond(w, p.config.StreamTimeout)
 	if err != nil {
-		log.Printf("%s [%s] %v", logPrefixError, version, err)
+		log.Printf("%s [%s] Hijack failed: %v", logPrefixError, version, err)
 		return
 	}
 
@@ -354,10 +355,6 @@ func (p *Proxy) handleV2Upload(ctx context.Context, clientConn net.Conn, targetH
 		closeOnce.Do(tunnelClose)
 		return
 	}
-	if postResp == nil {
-		closeOnce.Do(tunnelClose)
-		return
-	}
 	defer postResp.Body.Close()
 
 	if postResp.StatusCode != http.StatusCreated {
@@ -381,10 +378,6 @@ func (p *Proxy) handleV2Download(ctx context.Context, clientConn net.Conn, targe
 	getResp, err := p.httpClientGET.Do(getReq)
 	if err != nil && !isExpectedError(err) {
 		log.Printf("%s [%s] GET request failed: %v", logPrefixError, version, err)
-		closeOnce.Do(tunnelClose)
-		return
-	}
-	if getResp == nil {
 		closeOnce.Do(tunnelClose)
 		return
 	}
