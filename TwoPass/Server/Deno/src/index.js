@@ -23,8 +23,6 @@ class TCPSession {
   constructor() {
     this.socket = null;
     this.ready = null;
-    this.postDone = false;
-    this.getDone = false;
   }
 
   /**
@@ -180,16 +178,7 @@ Deno.serve({
 
       const session = sessions.get(sessionId) || sessions.set(sessionId, new TCPSession()).get(sessionId);
 
-      return session.handleRequest(request, sessionId).finally(() => {
-        if (request.method === "POST") session.postDone = true;
-        if (request.method === "GET") session.getDone = true;
-        
-        if (session.postDone && session.getDone) {
-          session.cleanup(sessionId);
-          sessions.delete(sessionId);
-          console.log(`[-] [v2] [${sessionId}] Session cleaned up`);
-        }
-      });
+      return session.handleRequest(request, sessionId);
     }
 
     // V1: Single bidirectional stream
