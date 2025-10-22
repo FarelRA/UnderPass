@@ -29,6 +29,8 @@ import (
 var Version = "dev"
 
 const (
+	protocolV1       = "v1"
+	protocolV2       = "v2"
 	logPrefixInfo    = "[*]"
 	logPrefixSuccess = "[+]"
 	logPrefixRequest = "[>]"
@@ -38,8 +40,6 @@ const (
 	logPrefixError   = "[!]"
 	bufferSize       = 128 * 1024
 	idleConnTimeout  = 120 * time.Second
-	protocolV1       = "v1"
-	protocolV2       = "v2"
 )
 
 // ============================================================================
