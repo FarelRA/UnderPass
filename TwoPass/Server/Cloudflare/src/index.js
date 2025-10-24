@@ -52,7 +52,11 @@ export class TCPSession {
    * @param {Request} request - Incoming HTTP request
    * @returns {Response} HTTP response
    */
-  async fetch(request, targetHost, targetPort, sessionId) {
+  async fetch(request) {
+    const targetHost = request.headers.get('X-Target-Host')?.toLowerCase().trim();
+    const targetPort = parseInt(request.headers.get('X-Target-Port'), 10);
+    const sessionId = request.headers.get('X-Session-ID');
+
     console.log(`[*] [v2] [${sessionId}] Request for session`);
 
     // Try connect to the target
@@ -151,7 +155,7 @@ export default {
     if (sessionId) {
       const id = env.TCP_SESSION.idFromName(sessionId);
       const stub = env.TCP_SESSION.get(id);
-      return stub.fetch(request, targetHost, targetPort, sessionId);
+      return stub.fetch(request);
     }
 
     // V1: Single bidirectional stream
