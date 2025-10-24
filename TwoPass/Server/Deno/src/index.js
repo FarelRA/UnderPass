@@ -55,10 +55,13 @@ class TCPSession {
   /**
    * Handles incoming requests for this session
    * @param {Request} request - Incoming HTTP request
-   * @param {string} sessionId - Session ID
    * @returns {Response} HTTP response
    */
-  async handleRequest(request, targetHost, targetPort, sessionId) {
+  async handleRequest(request) {
+    const targetHost = request.headers.get('X-Target-Host')?.toLowerCase().trim();
+    const targetPort = parseInt(request.headers.get('X-Target-Port'), 10);
+    const sessionId = request.headers.get('X-Session-ID');
+
     console.log(`[*] [v2] [${sessionId}] Request for session`);
 
     // Try connect to the target
@@ -157,7 +160,7 @@ Deno.serve({
     if (sessionId) {
       const session = sessions.get(sessionId)
         || sessions.set(sessionId, new TCPSession()).get(sessionId);
-      return session.handleRequest(request, targetHost, targetPort, sessionId);
+      return session.handleRequest(request);
     }
 
     // V1: Single bidirectional stream
