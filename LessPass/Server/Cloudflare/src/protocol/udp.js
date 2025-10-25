@@ -49,11 +49,11 @@ export async function handleUdpProxy(webStream, initialPayload, config) {
  * Handles packets that may span multiple WebSocket messages.
  *
  * @param {Uint8Array} initialPayload - The initial payload from VLESS header.
- * @param {ReadableStream} wsReadable - The WebSocket readable stream.
+ * @param {ReadableStreamDefaultReader} wsReader - The WebSocket readable stream reader.
  * @returns {Promise<Uint8Array>} The complete DNS packet.
  * @throws {Error} If WebSocket closes before complete packet is received.
  */
-async function readPacket(initialPayload, wsReadable) {
+async function readPacket(initialPayload, wsReader) {
   logger.trace('UDP:PACKET', `Starting packet read with ${initialPayload.byteLength} bytes initial payload`);
   let buffer = initialPayload;
 
@@ -72,35 +72,29 @@ async function readPacket(initialPayload, wsReadable) {
 
   // Read additional chunks until complete
   logger.debug('UDP:PACKET', 'Reading additional chunks from WebSocket');
-  const reader = wsReadable.getReader();
   let chunksRead = 0;
   
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
+  while (true) {
+    const { value, done } = await wsReader.read();
+    
+    if (done) {
+      const error = 'WebSocket closed before complete packet received';
+      logger.error('UDP:PACKET', error);
+      throw new Error(error);
+    }
+
+    chunksRead++;
+    buffer = concatBuffers(buffer, value);
+    logger.trace('UDP:PACKET', `Chunk ${chunksRead} received: ${value.byteLength} bytes (total: ${buffer.byteLength})`);
+
+    if (buffer.byteLength >= 2) {
+      const packetLength = new DataView(buffer.buffer, buffer.byteOffset).getUint16(0);
       
-      if (done) {
-        const error = 'WebSocket closed before complete packet received';
-        logger.error('UDP:PACKET', error);
-        throw new Error(error);
-      }
-
-      chunksRead++;
-      buffer = concatBuffers(buffer, value);
-      logger.trace('UDP:PACKET', `Chunk ${chunksRead} received: ${value.byteLength} bytes (total: ${buffer.byteLength})`);
-
-      if (buffer.byteLength >= 2) {
-        const packetLength = new DataView(buffer.buffer, buffer.byteOffset).getUint16(0);
-        
-        if (buffer.byteLength >= 2 + packetLength) {
-          logger.debug('UDP:PACKET', `Complete packet assembled after ${chunksRead} chunks`);
-          return buffer.subarray(2, 2 + packetLength);
-        }
+      if (buffer.byteLength >= 2 + packetLength) {
+        logger.debug('UDP:PACKET', `Complete packet assembled after ${chunksRead} chunks`);
+        return buffer.subarray(2, 2 + packetLength);
       }
     }
-  } finally {
-    reader.releaseLock();
-    logger.trace('UDP:PACKET', 'Reader released');
   }
 }
 
@@ -164,11 +158,11 @@ async function queryDns(dnsQuery, config) {
  * Sends a DNS response back to the client in VLESS UDP format.
  * Format: [2-byte length][DNS response data]
  *
- * @param {WritableStream} wsWritable - The WebSocket writable stream.
+ * @param {WritableStreamDefaultWriter} wsWriter - The WebSocket writable stream writer.
  * @param {Uint8Array} dnsResponse - The DNS response data.
  * @returns {Promise<void>}
  */
-async function sendResponse(wsWritable, dnsResponse) {
+async function sendResponse(wsWriter, dnsResponse) {
   logger.trace('UDP:RESPONSE', `Formatting response: ${dnsResponse.byteLength} bytes`);
   
   // Format response in VLESS UDP format
@@ -178,8 +172,6 @@ async function sendResponse(wsWritable, dnsResponse) {
   logger.trace('UDP:RESPONSE', `Packet formatted: ${packet.byteLength} bytes total`);
 
   // Send to client
-  const writer = wsWritable.getWriter();
-  await writer.write(packet);
-  writer.releaseLock();
+  await wsWriter.write(packet);
   logger.debug('UDP:RESPONSE', 'Response sent to client');
 }
