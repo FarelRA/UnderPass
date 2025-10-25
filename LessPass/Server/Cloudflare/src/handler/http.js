@@ -67,12 +67,12 @@ function handleInfoRequest(request, env, config) {
 
   // === Build Diagnostic Information ===
   const diagnosticInfo = {
-    status: 'OK',
+    status: 'Ok',
     request: {
       method: request.method,
       url: request.url,
       headers: Object.fromEntries(request.headers.entries()),
-      cf: request.cf, // Cloudflare-specific request properties
+      cf: request.cf,
     },
     env,
     config,

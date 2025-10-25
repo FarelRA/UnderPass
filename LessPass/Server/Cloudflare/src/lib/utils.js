@@ -59,7 +59,7 @@ export async function getFirstChunk(request, server) {
  * @param {WebSocket} server - The server-side WebSocket connection.
  * @returns {ReadableStream} A readable stream of Uint8Array chunks from WebSocket messages.
  */
-export function createConsumableStream(server) {
+export function createReadableStream(server) {
   return new ReadableStream({
     start(controller) {
       server.addEventListener('message', (event) => {
@@ -73,6 +73,21 @@ export function createConsumableStream(server) {
       server.addEventListener('error', (err) => {
         controller.error(err);
       });
+    },
+  });
+}
+
+/**
+ * Creates a WritableStream that sends data to a WebSocket.
+ * Converts the WebSocket send API into a stream-based API for easier processing.
+ *
+ * @param {WebSocket} server - The server-side WebSocket connection.
+ * @returns {WritableStream} A writable stream that sends Uint8Array chunks to WebSocket.
+ */
+export function createWritableStream(server) {
+  return new WritableStream({
+    write(chunk) {
+      server.send(chunk);
     },
   });
 }
@@ -136,10 +151,6 @@ export function base64ToUint8Array(base64Str) {
  * stringifyUUID(uuid); // "12345678-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
  */
 export function stringifyUUID(uuidBytes) {
-  if (uuidBytes.length !== 16) {
-    throw new Error(`UUID must be 16 bytes, got ${uuidBytes.length}`);
-  }
-
   // Build UUID string using pre-computed hex lookup table
   return (
     byteToHex[uuidBytes[0]] +
