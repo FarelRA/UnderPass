@@ -16,13 +16,12 @@ import { logger } from '../lib/logger.js';
  *
  * @param {string} destinationAddress - Destination hostname or IP address.
  * @param {number} destinationPort - Destination port number.
- * @param {ReadableStream} wsReadable - The WebSocket readable stream.
- * @param {WritableStream} wsWritable - The WebSocket writable stream.
+ * @param {{readable: ReadableStream, writable: WritableStream}} webStream - The WebSocket streams.
  * @param {Uint8Array} initialPayload - The payload from VLESS header to send to remote.
  * @param {object} config - The request-scoped configuration.
  * @returns {Promise<void>}
  */
-export async function handleTcpProxy(destinationAddress, destinationPort, wsReadable, wsWritable, initialPayload, config) {
+export async function handleTcpProxy(destinationAddress, destinationPort, webStream, initialPayload, config) {
   logger.debug('TCP:PROXY', `Starting TCP proxy to ${destinationAddress}:${destinationPort}`);
   logger.trace('TCP:PROXY', `Initial payload size: ${initialPayload.byteLength} bytes`);
 
@@ -32,19 +31,13 @@ export async function handleTcpProxy(destinationAddress, destinationPort, wsRead
 
   if (connection) {
     logger.info('TCP:PROXY', 'Primary connection established successfully');
-    await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsReadable, wsWritable);
+    await proxyConnection(connection.remoteSocket, connection.firstResponse, webStream);
     logger.info('TCP:PROXY', 'Primary connection completed');
     return;
   }
 
   // Primary connection failed, try relay
   logger.warn('TCP:PROXY', 'Primary connection failed or idle, attempting relay');
-
-  if (!config.RELAY_ADDR) {
-    const error = 'No relay address configured';
-    logger.error('TCP:PROXY', error);
-    throw new Error(error);
-  }
 
   // Parse relay address
   const [relayAddress, relayPortString] = config.RELAY_ADDR.split(':');
@@ -59,7 +52,7 @@ export async function handleTcpProxy(destinationAddress, destinationPort, wsRead
 
   if (connection) {
     logger.info('TCP:PROXY', 'Relay connection established successfully');
-    await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsReadable, wsWritable);
+    await proxyConnection(connection.remoteSocket, connection.firstResponse, webStream);
     logger.info('TCP:PROXY', 'Relay connection completed');
   } else {
     const error = 'Both primary and relay connections failed';
@@ -77,7 +70,7 @@ export async function handleTcpProxy(destinationAddress, destinationPort, wsRead
  * @param {string} hostname - The destination hostname or IP address.
  * @param {number} port - The destination port number.
  * @param {Uint8Array} initialPayload - The initial data to send to the remote server.
- * @returns {Promise<{remoteSocket: Socket, remoteReader: ReadableStreamDefaultReader, remoteWriter: WritableStreamDefaultWriter, firstResponse: Uint8Array}|null>}
+ * @returns {Promise<{remoteSocket: Socket, firstResponse: Uint8Array}|null>}
  *          Connection objects if successful, or null if the connection is idle/unresponsive.
  * @throws {Error} If connection fails.
  */
@@ -106,8 +99,12 @@ async function testConnection(hostname, port, initialPayload) {
       return null;
     }
 
+    // Release locks so socket streams can be used elsewhere
+    remoteReader.releaseLock();
+    remoteWriter.releaseLock();
+
     logger.debug('TCP:CONNECT', `Received first response: ${firstResponse.value.byteLength} bytes`);
-    return { remoteSocket, remoteReader, remoteWriter, firstResponse: firstResponse.value };
+    return { remoteSocket, firstResponse: firstResponse.value };
   } catch (error) {
     logger.error('TCP:CONNECT', `Connection failed: ${error.message}`);
     throw error;
@@ -118,27 +115,25 @@ async function testConnection(hostname, port, initialPayload) {
  * Proxies bidirectional data between the client WebSocket and remote TCP socket.
  * Sets up two concurrent data pumps: client→remote and remote→client.
  *
- * @param {ReadableStreamDefaultReader} remoteReader - Reader for data from remote socket.
- * @param {WritableStreamDefaultWriter} remoteWriter - Writer for data to remote socket.
+ * @param {Socket} remoteSocket - The remote TCP socket.
  * @param {Uint8Array} firstResponse - The first response from remote socket (already read).
- * @param {ReadableStream} wsReadable - The WebSocket readable stream.
- * @param {WritableStream} wsWritable - The WebSocket writable stream.
+ * @param {{readable: ReadableStream, writable: WritableStream}} webStream - The WebSocket streams.
  * @returns {Promise<void>}
  */
-async function proxyConnection(remoteReader, remoteWriter, firstResponse, wsReadable, wsWritable) {
+async function proxyConnection(remoteSocket, firstResponse, webStream) {
   logger.debug('TCP:PROXY', 'Starting bidirectional proxy');
 
   // Send first response to client
   logger.trace('TCP:PROXY', `Sending first response to client: ${firstResponse.byteLength} bytes`);
-  const wsWriter = wsWritable.getWriter();
+  const wsWriter = webStream.writable.getWriter();
   await wsWriter.write(firstResponse);
   wsWriter.releaseLock();
 
   // Set up bidirectional data pumping
   logger.debug('TCP:PROXY', 'Setting up bidirectional data pumps');
   await Promise.all([
-    pumpReadableToWritable(wsReadable.getReader(), remoteWriter, 'Client→Remote'),
-    pumpReadableToWritable(remoteReader, wsWritable.getWriter(), 'Remote→Client'),
+    pumpReadableToWritable(webStream.readable.getReader(), remoteSocket.writable.getWriter(), 'Client→Remote'),
+    pumpReadableToWritable(remoteSocket.readable.getReader(), webStream.writable.getWriter(), 'Remote→Client'),
   ]);
   
   logger.debug('TCP:PROXY', 'Bidirectional proxy completed');

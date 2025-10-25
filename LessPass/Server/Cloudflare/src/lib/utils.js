@@ -67,20 +67,17 @@ export async function getFirstChunk(request, server) {
 }
 
 /**
- * Creates a ReadableStream from WebSocket messages.
- * Converts the event-based WebSocket API into a stream-based API for easier processing.
- * The stream will enqueue all incoming messages and close when the WebSocket closes.
+ * Creates ReadableStream and WritableStream from a WebSocket.
+ * Converts the event-based WebSocket API into stream-based APIs for easier processing.
  *
  * @param {WebSocket} server - The server-side WebSocket connection.
- * @returns {ReadableStream} A readable stream of Uint8Array chunks from WebSocket messages.
+ * @returns {{readable: ReadableStream, writable: WritableStream}} Readable and writable streams for the WebSocket.
  */
-export function createReadableStream(server) {
-  logger.trace('UTILS:STREAM', 'Creating ReadableStream from WebSocket');
+export function createWebSocketStreams(server) {
+  logger.trace('UTILS:STREAM', 'Creating WebSocket streams');
   
-  return new ReadableStream({
+  const readable = new ReadableStream({
     start(controller) {
-      logger.trace('UTILS:STREAM', 'ReadableStream started, attaching event listeners');
-      
       server.addEventListener('message', (event) => {
         const chunk = new Uint8Array(event.data);
         logger.trace('UTILS:STREAM', `Enqueueing message: ${chunk.byteLength} bytes`);
@@ -98,25 +95,15 @@ export function createReadableStream(server) {
       });
     },
   });
-}
 
-/**
- * Creates a WritableStream that sends data to a WebSocket.
- * Converts the WebSocket send API into a stream-based API for easier processing.
- * All writes are sent directly to the WebSocket.
- *
- * @param {WebSocket} server - The server-side WebSocket connection.
- * @returns {WritableStream} A writable stream that sends Uint8Array chunks to WebSocket.
- */
-export function createWritableStream(server) {
-  logger.trace('UTILS:STREAM', 'Creating WritableStream for WebSocket');
-  
-  return new WritableStream({
+  const writable = new WritableStream({
     write(chunk) {
       logger.trace('UTILS:STREAM', `Writing to WebSocket: ${chunk.byteLength} bytes`);
       server.send(chunk);
     },
   });
+
+  return { readable, writable };
 }
 
 /**
