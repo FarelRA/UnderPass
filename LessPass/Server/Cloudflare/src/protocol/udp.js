@@ -17,14 +17,9 @@ import { logger } from '../lib/logger.js';
  * @returns {Promise<void>}
  */
 export async function handleUdpProxy(wsReadable, wsWritable, initialPayload, config) {
-  try {
-    const dnsQuery = await readPacket(initialPayload, wsReadable);
-    const dnsResponse = await queryDns(dnsQuery, config);
-    await sendResponse(wsWritable, dnsResponse);
-    logger.info('UDP:PROXY', 'DNS query processed successfully');
-  } catch (error) {
-    logger.error('UDP:PROXY', `Error: ${error.message}`);
-  }
+  const dnsQuery = await readPacket(initialPayload, wsReadable);
+  const dnsResponse = await queryDns(dnsQuery, config);
+  await sendResponse(wsWritable, dnsResponse);
 }
 
 // === Private Helper Functions ===
@@ -39,7 +34,7 @@ export async function handleUdpProxy(wsReadable, wsWritable, initialPayload, con
 async function readPacket(initialPayload, wsReadable) {
   let buffer = initialPayload;
 
-  // Check if initial payload already contains complete packet
+  // Check if initial payload contains complete packet
   if (buffer.byteLength >= 2) {
     const packetLength = new DataView(buffer.buffer, buffer.byteOffset).getUint16(0);
     if (buffer.byteLength >= 2 + packetLength) {
@@ -52,9 +47,7 @@ async function readPacket(initialPayload, wsReadable) {
   try {
     while (true) {
       const { value, done } = await reader.read();
-      if (done) {
-        throw new Error('WebSocket closed before complete packet received');
-      }
+      if (done) throw new Error('WebSocket closed before complete packet');
 
       buffer = concatBuffers(buffer, value);
 
@@ -99,13 +92,13 @@ async function queryDns(dnsQuery, config) {
   });
 
   if (!response.ok) {
-    throw new Error(`DoH request failed with status ${response.status}`);
+    throw new Error(`DoH failed: ${response.status}`);
   }
 
   const dnsResult = new Uint8Array(await response.arrayBuffer());
 
   if (dnsResult.byteLength === 0) {
-    throw new Error('DoH returned empty response');
+    throw new Error('Empty DoH response');
   }
 
   return dnsResult;
@@ -121,7 +114,7 @@ async function sendResponse(wsWritable, dnsResponse) {
   const packet = new Uint8Array(2 + dnsResponse.byteLength);
   new DataView(packet.buffer).setUint16(0, dnsResponse.byteLength);
   packet.set(dnsResponse, 2);
-  
+
   const writer = wsWritable.getWriter();
   await writer.write(packet);
   writer.releaseLock();

@@ -22,20 +22,17 @@ import { logger } from '../lib/logger.js';
  * @returns {Promise<void>}
  */
 export async function handleTcpProxy(destinationAddress, destinationPort, wsReadable, wsWritable, initialPayload, config) {
-  // === Attempt Primary Connection ===
+  // Try primary connection
   let connection = await testConnection(destinationAddress, destinationPort, initialPayload);
 
   if (connection) {
-    logger.info('TCP:PROXY', 'Primary connection established successfully');
+    logger.info('TCP:PROXY', 'Primary connection established');
     await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsReadable, wsWritable);
     return;
   }
 
-  logger.warn('TCP:PROXY', 'Primary connection closed without data exchange');
-
-  // === Attempt Relay Connection (Fallback) ===
-  logger.info('TCP:PROXY', `Attempting relay connection to ${config.RELAY_ADDR}`);
-
+  // Try relay connection as fallback
+  logger.warn('TCP:PROXY', 'Primary failed, trying relay');
   const [relayAddress, relayPortString] = config.RELAY_ADDR.split(':');
   const relayPort = relayPortString ? parseInt(relayPortString, 10) : destinationPort;
 
@@ -44,10 +41,10 @@ export async function handleTcpProxy(destinationAddress, destinationPort, wsRead
   connection = await testConnection(relayAddress, relayPort, initialPayload);
 
   if (connection) {
-    logger.info('TCP:PROXY', 'Relay connection established successfully');
+    logger.info('TCP:PROXY', 'Relay connection established');
     await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsReadable, wsWritable);
   } else {
-    logger.error('TCP:PROXY', 'Both primary and relay connections failed');
+    logger.error('TCP:PROXY', 'Both primary and relay failed');
   }
 }
 
@@ -65,31 +62,20 @@ export async function handleTcpProxy(destinationAddress, destinationPort, wsRead
  * @throws {Error} If connection fails.
  */
 async function testConnection(hostname, port, initialPayload) {
-  logger.info('TCP:CONNECT', `Testing connection to ${hostname}:${port}`);
-
-  // Establish TCP connection
   const remoteSocket = await connect({ hostname, port });
   const remoteReader = remoteSocket.readable.getReader();
   const remoteWriter = remoteSocket.writable.getWriter();
 
-  // Send initial payload if present
   if (initialPayload.byteLength > 0) {
     await remoteWriter.write(initialPayload);
   }
 
-  // Wait for first response to validate connection
   const firstResponse = await remoteReader.read();
   if (firstResponse.done) {
-    // Connection closed immediately
     return null;
   }
 
-  return {
-    remoteSocket,
-    remoteReader,
-    remoteWriter,
-    firstResponse: firstResponse.value,
-  };
+  return { remoteSocket, remoteReader, remoteWriter, firstResponse: firstResponse.value };
 }
 
 /**
@@ -104,15 +90,15 @@ async function testConnection(hostname, port, initialPayload) {
  * @returns {Promise<void>}
  */
 async function proxyConnection(remoteReader, remoteWriter, firstResponse, wsReadable, wsWritable) {
-  // Send the first response back to client immediately
+  // Send first response to client
   const wsWriter = wsWritable.getWriter();
   await wsWriter.write(firstResponse);
   wsWriter.releaseLock();
 
-  // Set up bidirectional data pumping
+  // Bidirectional data pumping
   await Promise.all([
-    pumpReadableToWritable(wsReadable.getReader(), remoteWriter), // Client → Remote
-    pumpReadableToWritable(remoteReader, wsWritable.getWriter()), // Remote → Client
+    pumpReadableToWritable(wsReadable.getReader(), remoteWriter),
+    pumpReadableToWritable(remoteReader, wsWritable.getWriter()),
   ]);
 }
 
