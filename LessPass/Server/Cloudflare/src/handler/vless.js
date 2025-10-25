@@ -7,7 +7,7 @@ import { VLESS } from '../lib/config.js';
 import { logger } from '../lib/logger.js';
 import { handleTcpProxy } from '../protocol/tcp.js';
 import { handleUdpProxy } from '../protocol/udp.js';
-import { getFirstChunk, createReadableStream, stringifyUUID } from '../lib/utils.js';
+import { getFirstChunk, createReadableStream, createWritableStream, stringifyUUID } from '../lib/utils.js';
 
 // === Module-Level Constants ===
 const textDecoder = new TextDecoder();
@@ -123,8 +123,9 @@ async function processVlessConnection(request, clientWebSocket, config) {
   logger.debug('VLESS:STREAM', `Received first chunk: ${firstChunk.byteLength} bytes`);
 
   // === Step 2: Create Stream for Subsequent Data ===
-  const wsStream = createReadableStream(clientWebSocket);
-  logger.debug('VLESS:STREAM', 'Created readable stream');
+  const wsReadable = createReadableStream(clientWebSocket);
+  const wsWritable = createWritableStream(clientWebSocket);
+  logger.debug('VLESS:STREAM', 'Created readable and writable streams');
 
   // === Step 3: Parse VLESS Header ===
   logger.debug('VLESS:HEADER', 'Parsing VLESS header');
@@ -144,12 +145,14 @@ async function processVlessConnection(request, clientWebSocket, config) {
 
   // === Step 6: Send VLESS Handshake Response ===
   logger.debug('VLESS:HANDSHAKE', 'Sending VLESS handshake response to client');
-  clientWebSocket.send(vlessResponse);
+  const writer = wsWritable.getWriter();
+  await writer.write(vlessResponse);
+  writer.releaseLock();
 
   // === Step 7: Dispatch to Protocol Handler ===
   if (protocol === 'TCP') {
     logger.debug('VLESS:DISPATCH', 'Dispatching to TCP proxy handler');
-    await handleTcpProxy(address, port, clientWebSocket, payload, wsStream, config);
+    await handleTcpProxy(address, port, wsReadable, wsWritable, payload, config);
   } else {
     // UDP only supports DNS (port 53)
     if (port !== 53) {
@@ -157,7 +160,7 @@ async function processVlessConnection(request, clientWebSocket, config) {
       throw new Error(`UDP is only supported for DNS on port 53, got port ${port}`);
     }
     logger.debug('VLESS:DISPATCH', 'Dispatching to UDP proxy handler');
-    await handleUdpProxy(clientWebSocket, payload, wsStream, config);
+    await handleUdpProxy(wsReadable, wsWritable, payload, config);
   }
 
   logger.info('VLESS:PROCESS', `${protocol} proxy completed successfully`);
