@@ -151,9 +151,7 @@ async function processVlessConnection(request, clientWebSocket, config) {
 
   // Send VLESS handshake response
   logger.debug('VLESS:HANDSHAKE', 'Sending handshake response to client');
-  const writer = webStream.writable.getWriter();
-  await writer.write(vlessResponse);
-  writer.releaseLock();
+  await webStream.writable.write(vlessResponse);
   logger.trace('VLESS:HANDSHAKE', 'Handshake response sent');
 
   // Dispatch to appropriate protocol handler

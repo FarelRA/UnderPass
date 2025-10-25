@@ -71,7 +71,7 @@ export async function getFirstChunk(request, server) {
  * Converts the event-based WebSocket API into stream-based APIs for easier processing.
  *
  * @param {WebSocket} server - The server-side WebSocket connection.
- * @returns {{readable: ReadableStream, writable: WritableStream}} Readable and writable streams for the WebSocket.
+ * @returns {{readable: ReadableStreamDefaultReader, writable: WritableStreamDefaultWriter}} Reader and writer for the WebSocket.
  */
 export function createWebSocketStreams(server) {
   logger.trace('UTILS:STREAM', 'Creating WebSocket streams');
@@ -103,7 +103,7 @@ export function createWebSocketStreams(server) {
     },
   });
 
-  return { readable, writable };
+  return { readable: readable.getReader(), writable: writable.getWriter() };
 }
 
 /**
