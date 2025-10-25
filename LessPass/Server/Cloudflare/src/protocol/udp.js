@@ -12,20 +12,19 @@ import { logger } from '../lib/logger.js';
  * Handles a single DNS query over UDP via DNS-over-HTTPS.
  * Reads DNS packet from WebSocket, queries DoH server, and sends response back.
  *
- * @param {ReadableStream} wsReadable - The WebSocket readable stream.
- * @param {WritableStream} wsWritable - The WebSocket writable stream.
+ * @param {{readable: ReadableStream, writable: WritableStream}} webStream - The WebSocket streams.
  * @param {Uint8Array} initialPayload - The initial payload from VLESS header.
  * @param {object} config - The request-scoped configuration.
  * @returns {Promise<void>}
  */
-export async function handleUdpProxy(wsReadable, wsWritable, initialPayload, config) {
+export async function handleUdpProxy(webStream, initialPayload, config) {
   logger.debug('UDP:PROXY', 'Starting UDP proxy for DNS query');
   logger.trace('UDP:PROXY', `Initial payload size: ${initialPayload.byteLength} bytes`);
 
   try {
     // Read complete DNS packet
     logger.debug('UDP:PACKET', 'Reading DNS packet from WebSocket');
-    const dnsQuery = await readPacket(initialPayload, wsReadable);
+    const dnsQuery = await readPacket(initialPayload, webStream.readable);
     logger.info('UDP:PACKET', `DNS query received: ${dnsQuery.byteLength} bytes`);
 
     // Query DoH server
@@ -35,7 +34,7 @@ export async function handleUdpProxy(wsReadable, wsWritable, initialPayload, con
 
     // Send response back to client
     logger.debug('UDP:RESPONSE', 'Sending DNS response to client');
-    await sendResponse(wsWritable, dnsResponse);
+    await sendResponse(webStream.writable, dnsResponse);
     logger.info('UDP:PROXY', 'DNS query processed successfully');
   } catch (error) {
     logger.error('UDP:PROXY', `DNS query failed: ${error.message}`);

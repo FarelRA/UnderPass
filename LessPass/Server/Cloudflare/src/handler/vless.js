@@ -9,9 +9,10 @@ import { VLESS } from '../lib/config.js';
 import { logger } from '../lib/logger.js';
 import { handleTcpProxy } from '../protocol/tcp.js';
 import { handleUdpProxy } from '../protocol/udp.js';
-import { getFirstChunk, createReadableStream, createWritableStream, stringifyUUID } from '../lib/utils.js';
+import { getFirstChunk, createWebSocketStreams, stringifyUUID } from '../lib/utils.js';
 
-// Module-level constants
+// === Constants ===
+
 const textDecoder = new TextDecoder();
 const vlessResponse = new Uint8Array([0, 0]);
 
@@ -47,6 +48,8 @@ export function handleVlessRequest(request, config) {
   return new Response(null, { status: 101, webSocket: clientWebSocket });
 }
 
+// === Private Helper Functions ===
+
 /**
  * Processes the VLESS protocol header from a Uint8Array.
  * Parses version, user ID, command, address, port, and payload.
@@ -56,9 +59,9 @@ export function handleVlessRequest(request, config) {
  *          Parsed VLESS header components.
  * @throws {Error} If the header is malformed or too short.
  */
-export function processVlessHeader(chunk) {
+function processVlessHeader(chunk) {
   logger.trace('VLESS:HEADER', `Processing header (${chunk.byteLength} bytes)`);
-  
+
   // Validate minimum header length
   if (chunk.byteLength < VLESS.MIN_HEADER_LENGTH) {
     const error = `Invalid VLESS header: insufficient length. Got ${chunk.byteLength}, expected at least ${VLESS.MIN_HEADER_LENGTH}`;
@@ -107,8 +110,6 @@ export function processVlessHeader(chunk) {
   return { vlessVersion, userID, protocol, address, port, payload };
 }
 
-// === Private Helper Functions ===
-
 /**
  * Processes a VLESS connection: reads header, authenticates, and dispatches to protocol handler.
  *
@@ -127,9 +128,8 @@ async function processVlessConnection(request, clientWebSocket, config) {
   logger.debug('VLESS:STREAM', `Received first chunk: ${firstChunk.byteLength} bytes`);
 
   // Create readable and writable streams for subsequent data
-  logger.trace('VLESS:STREAM', 'Creating readable and writable streams');
-  const wsReadable = createReadableStream(clientWebSocket);
-  const wsWritable = createWritableStream(clientWebSocket);
+  logger.trace('VLESS:STREAM', 'Creating WebSocket streams');
+  const webStream = createWebSocketStreams(clientWebSocket);
   logger.debug('VLESS:STREAM', 'Streams created successfully');
 
   // Parse VLESS header
@@ -151,7 +151,7 @@ async function processVlessConnection(request, clientWebSocket, config) {
 
   // Send VLESS handshake response
   logger.debug('VLESS:HANDSHAKE', 'Sending handshake response to client');
-  const writer = wsWritable.getWriter();
+  const writer = webStream.writable.getWriter();
   await writer.write(vlessResponse);
   writer.releaseLock();
   logger.trace('VLESS:HANDSHAKE', 'Handshake response sent');
@@ -159,7 +159,7 @@ async function processVlessConnection(request, clientWebSocket, config) {
   // Dispatch to appropriate protocol handler
   if (protocol === 'TCP') {
     logger.info('VLESS:DISPATCH', 'Dispatching to TCP proxy handler');
-    await handleTcpProxy(address, port, wsReadable, wsWritable, payload, config);
+    await handleTcpProxy(address, port, webStream, payload, config);
   } else if (protocol === 'UDP') {
     // UDP only supports DNS (port 53)
     if (port !== 53) {
@@ -168,7 +168,7 @@ async function processVlessConnection(request, clientWebSocket, config) {
       throw new Error(error);
     }
     logger.info('VLESS:DISPATCH', 'Dispatching to UDP proxy handler');
-    await handleUdpProxy(wsReadable, wsWritable, payload, config);
+    await handleUdpProxy(webStream, payload, config);
   } else {
     const error = `Unsupported protocol: ${protocol}`;
     logger.error('VLESS:DISPATCH', error);
