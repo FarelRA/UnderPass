@@ -1,16 +1,19 @@
 // =================================================================
 // File: lib/utils.js
-// Description: Shared utilities for VLESS parsing, stream manipulation, and WebSockets.
+// Description: Shared utilities for VLESS parsing, stream manipulation,
+//              and WebSocket operations. Provides stream wrappers for
+//              WebSocket API and data conversion utilities.
 // =================================================================
 
 import { byteToHex, WS_READY_STATE } from './config.js';
+import { logger } from './logger.js';
 
 // === WebSocket Stream Utilities ===
 
 /**
  * Gets the first chunk of data from a WebSocket connection.
- * Checks for early data in the Sec-WebSocket-Protocol header first,
- * otherwise waits for the first WebSocket message.
+ * Checks for early data in the Sec-WebSocket-Protocol header first (0-RTT optimization),
+ * otherwise waits for the first WebSocket message using event listeners.
  *
  * @param {Request} request - The incoming HTTP request with WebSocket upgrade.
  * @param {WebSocket} server - The server-side WebSocket connection.
@@ -18,18 +21,26 @@ import { byteToHex, WS_READY_STATE } from './config.js';
  * @throws {Error} If WebSocket closes or errors before receiving data.
  */
 export async function getFirstChunk(request, server) {
+  logger.trace('UTILS:CHUNK', 'Getting first chunk from WebSocket');
+
   // Check for early data in header (0-RTT optimization)
   const earlyDataHeader = request.headers.get('Sec-WebSocket-Protocol');
   if (earlyDataHeader) {
-    return base64ToUint8Array(earlyDataHeader);
+    logger.debug('UTILS:CHUNK', 'Early data found in Sec-WebSocket-Protocol header');
+    const chunk = base64ToUint8Array(earlyDataHeader);
+    logger.trace('UTILS:CHUNK', `Early data decoded: ${chunk.byteLength} bytes`);
+    return chunk;
   }
 
-  // Wait for first WebSocket message
+  // Wait for first WebSocket message using event listeners
+  logger.debug('UTILS:CHUNK', 'Waiting for first WebSocket message');
   return new Promise((resolve, reject) => {
     server.addEventListener(
       'message',
       (event) => {
-        resolve(new Uint8Array(event.data));
+        const chunk = new Uint8Array(event.data);
+        logger.debug('UTILS:CHUNK', `First message received: ${chunk.byteLength} bytes`);
+        resolve(chunk);
       },
       { once: true }
     );
@@ -37,7 +48,9 @@ export async function getFirstChunk(request, server) {
     server.addEventListener(
       'close',
       () => {
-        reject(new Error('WebSocket closed before first chunk'));
+        const error = 'WebSocket closed before first chunk';
+        logger.error('UTILS:CHUNK', error);
+        reject(new Error(error));
       },
       { once: true }
     );
@@ -45,6 +58,7 @@ export async function getFirstChunk(request, server) {
     server.addEventListener(
       'error',
       (err) => {
+        logger.error('UTILS:CHUNK', `WebSocket error: ${err?.message || 'Unknown error'}`);
         reject(err || new Error('WebSocket error'));
       },
       { once: true }
@@ -55,22 +69,31 @@ export async function getFirstChunk(request, server) {
 /**
  * Creates a ReadableStream from WebSocket messages.
  * Converts the event-based WebSocket API into a stream-based API for easier processing.
+ * The stream will enqueue all incoming messages and close when the WebSocket closes.
  *
  * @param {WebSocket} server - The server-side WebSocket connection.
  * @returns {ReadableStream} A readable stream of Uint8Array chunks from WebSocket messages.
  */
 export function createReadableStream(server) {
+  logger.trace('UTILS:STREAM', 'Creating ReadableStream from WebSocket');
+  
   return new ReadableStream({
     start(controller) {
+      logger.trace('UTILS:STREAM', 'ReadableStream started, attaching event listeners');
+      
       server.addEventListener('message', (event) => {
-        controller.enqueue(new Uint8Array(event.data));
+        const chunk = new Uint8Array(event.data);
+        logger.trace('UTILS:STREAM', `Enqueueing message: ${chunk.byteLength} bytes`);
+        controller.enqueue(chunk);
       });
 
       server.addEventListener('close', () => {
+        logger.debug('UTILS:STREAM', 'WebSocket closed, closing ReadableStream');
         controller.close();
       });
 
       server.addEventListener('error', (err) => {
+        logger.error('UTILS:STREAM', `WebSocket error: ${err?.message || 'Unknown error'}`);
         controller.error(err);
       });
     },
@@ -80,13 +103,17 @@ export function createReadableStream(server) {
 /**
  * Creates a WritableStream that sends data to a WebSocket.
  * Converts the WebSocket send API into a stream-based API for easier processing.
+ * All writes are sent directly to the WebSocket.
  *
  * @param {WebSocket} server - The server-side WebSocket connection.
  * @returns {WritableStream} A writable stream that sends Uint8Array chunks to WebSocket.
  */
 export function createWritableStream(server) {
+  logger.trace('UTILS:STREAM', 'Creating WritableStream for WebSocket');
+  
   return new WritableStream({
     write(chunk) {
+      logger.trace('UTILS:STREAM', `Writing to WebSocket: ${chunk.byteLength} bytes`);
       server.send(chunk);
     },
   });
@@ -102,10 +129,13 @@ export function createWritableStream(server) {
 export function safeCloseWebSocket(socket) {
   try {
     if (socket?.readyState < WS_READY_STATE.CLOSING) {
+      logger.debug('UTILS:WEBSOCKET', `Closing WebSocket (state: ${socket.readyState})`);
       socket.close();
+    } else {
+      logger.trace('UTILS:WEBSOCKET', `WebSocket already closing/closed (state: ${socket?.readyState})`);
     }
-  } catch {
-    // Ignore errors during close
+  } catch (error) {
+    logger.warn('UTILS:WEBSOCKET', `Error closing WebSocket: ${error.message}`);
   }
 }
 
@@ -120,20 +150,28 @@ export function safeCloseWebSocket(socket) {
  * @throws {Error} If the base64 string is malformed.
  */
 export function base64ToUint8Array(base64Str) {
-  // Convert URL-safe base64 to standard base64
-  const base64 = base64Str.replace(/-/g, '+').replace(/_/g, '/');
+  logger.trace('UTILS:BASE64', `Decoding base64 string: ${base64Str.length} characters`);
 
-  // Decode base64 to binary string
-  const binaryString = atob(base64);
-  const length = binaryString.length;
+  try {
+    // Convert URL-safe base64 to standard base64
+    const base64 = base64Str.replace(/-/g, '+').replace(/_/g, '/');
 
-  // Convert binary string to Uint8Array
-  const bytes = new Uint8Array(length);
-  for (let i = 0; i < length; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
+    // Decode base64 to binary string
+    const binaryString = atob(base64);
+    const length = binaryString.length;
+
+    // Convert binary string to Uint8Array
+    const bytes = new Uint8Array(length);
+    for (let i = 0; i < length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
+    logger.trace('UTILS:BASE64', `Decoded to ${bytes.byteLength} bytes`);
+    return bytes;
+  } catch (error) {
+    logger.error('UTILS:BASE64', `Failed to decode base64: ${error.message}`);
+    throw error;
   }
-
-  return bytes;
 }
 
 /**
@@ -144,15 +182,16 @@ export function base64ToUint8Array(base64Str) {
  *
  * @param {Uint8Array} uuidBytes - The 16-byte UUID array.
  * @returns {string} The UUID string in standard format with hyphens.
- * @throws {Error} If the array is not exactly 16 bytes.
  *
  * @example
  * const uuid = new Uint8Array([0x12, 0x34, 0x56, 0x78, ...]);
  * stringifyUUID(uuid); // "12345678-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
  */
 export function stringifyUUID(uuidBytes) {
+  logger.trace('UTILS:UUID', 'Converting UUID bytes to string');
+
   // Build UUID string using pre-computed hex lookup table
-  return (
+  const uuidString =
     byteToHex[uuidBytes[0]] +
     byteToHex[uuidBytes[1]] +
     byteToHex[uuidBytes[2]] +
@@ -172,6 +211,8 @@ export function stringifyUUID(uuidBytes) {
     byteToHex[uuidBytes[12]] +
     byteToHex[uuidBytes[13]] +
     byteToHex[uuidBytes[14]] +
-    byteToHex[uuidBytes[15]]
-  );
+    byteToHex[uuidBytes[15]];
+
+  logger.trace('UTILS:UUID', `UUID: ${uuidString}`);
+  return uuidString;
 }
