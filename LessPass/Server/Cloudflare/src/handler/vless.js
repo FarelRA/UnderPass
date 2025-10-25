@@ -26,19 +26,19 @@ const vlessResponse = new Uint8Array([0, 0]);
 export function handleVlessRequest(request, config) {
   logger.trace('VLESS:HANDLER', 'Handling VLESS request');
 
-  // Create WebSocket pair (client-facing and server-facing)
+  // Create WebSocket pair (client-facing and worker-facing)
   const pair = new WebSocketPair();
   const clientWebSocket = pair[0];
-  const serverWebSocket = pair[1];
+  const workerWebSocket = pair[1];
 
-  serverWebSocket.accept();
+  workerWebSocket.accept();
   logger.debug('VLESS:WEBSOCKET', 'WebSocket connection accepted');
 
   // Process VLESS connection asynchronously
   logger.info('VLESS:PROCESS', 'Starting VLESS connection processing');
-  processVlessConnection(serverWebSocket, request, config).catch((err) => {
+  processVlessConnection(request, workerWebSocket, config).catch((err) => {
     logger.error('VLESS:PROCESS', `Connection setup failed: ${err.message}`);
-    serverWebSocket.close(1011, `SETUP_ERROR: ${err.message}`);
+    workerWebSocket.close(1011, `SETUP_ERROR: ${err.message}`);
   });
 
   logger.debug('VLESS:HANDLER', 'Returning 101 Switching Protocols response');
@@ -68,7 +68,7 @@ export function processVlessHeader(chunk) {
   offset += VLESS.VERSION_LENGTH;
 
   // === Parse User ID (16 bytes UUID) ===
-  const userID = chunk.subarray(offset, offset + VLESS.USERID_LENGTH);
+  const userID = stringifyUUID(chunk.subarray(offset, offset + VLESS.USERID_LENGTH));
   offset += VLESS.USERID_LENGTH;
 
   // === Parse Addon Section (variable length) ===
@@ -123,22 +123,22 @@ export function processVlessHeader(chunk) {
  * Reads the VLESS header, validates the user, and dispatches to the correct protocol handler.
  * This is the main connection processing pipeline.
  *
- * @param {WebSocket} serverWebSocket - The server-side of the WebSocketPair.
  * @param {Request} request - The original incoming request.
+ * @param {WebSocket} clientWebSocket - The worker-side of the WebSocketPair.
  * @param {object} config - The request-scoped configuration.
  * @returns {Promise<void>}
  * @throws {Error} If authentication fails or protocol handling fails.
  */
-async function processVlessConnection(serverWebSocket, request, config) {
+async function processVlessConnection(request, clientWebSocket, config) {
   logger.trace('VLESS:PROCESS', 'Processing VLESS connection');
 
   // === Step 1: Get First Data Chunk ===
   logger.debug('VLESS:STREAM', 'Getting first chunk from WebSocket');
-  const firstChunk = await getFirstChunk(serverWebSocket, request);
+  const firstChunk = await getFirstChunk(request, clientWebSocket);
   logger.debug('VLESS:STREAM', `Received first chunk: ${firstChunk.byteLength} bytes`);
 
   // === Step 2: Create Stream for Subsequent Data ===
-  const wsStream = createConsumableStream(serverWebSocket);
+  const wsStream = createConsumableStream(clientWebSocket);
   logger.debug('VLESS:STREAM', 'Created consumable stream');
 
   // === Step 3: Parse VLESS Header ===
@@ -147,16 +147,11 @@ async function processVlessConnection(serverWebSocket, request, config) {
   logger.debug('VLESS:HEADER', `Parsed: ${protocol} to ${address}:${port}, payload ${payload.byteLength} bytes`);
 
   // === Step 4: Authenticate User ===
-  logger.trace('VLESS:AUTH', 'Converting user ID to string');
-  const userIDString = stringifyUUID(userID);
-  logger.trace('VLESS:AUTH', `User ID: ${userIDString}`);
-
-  if (userIDString !== config.USER_ID) {
-    logger.warn('VLESS:AUTH', `Authentication failed: expected ${config.USER_ID}, got ${userIDString}`);
-    throw new Error(`Invalid user ID. Expected: ${config.USER_ID}, Got: ${userIDString}`);
+  if (userID !== config.USER_ID) {
+    logger.warn('VLESS:AUTH', `Authentication failed: expected ${config.USER_ID}, got ${userID}`);
+    throw new Error(`Invalid user ID. Expected: ${config.USER_ID}, Got: ${userID}`);
   }
-
-  logger.info('VLESS:AUTH', `User authenticated: ${userIDString}`);
+  logger.info('VLESS:AUTH', `User authenticated: ${userID}`);
 
   // === Step 5: Update Logging Context ===
   logger.updateLogContext({ remoteAddress: address, remotePort: port });
@@ -164,20 +159,24 @@ async function processVlessConnection(serverWebSocket, request, config) {
 
   // === Step 6: Send VLESS Handshake Response ===
   logger.debug('VLESS:HANDSHAKE', 'Sending VLESS handshake response to client');
-  serverWebSocket.send(vlessResponse);
+  clientWebSocket.send(vlessResponse);
 
   // === Step 7: Dispatch to Protocol Handler ===
-  if (protocol === 'UDP') {
+  if (protocol === 'TCP') {
+    logger.debug('VLESS:DISPATCH', 'Dispatching to TCP proxy handler');
+    await handleTcpProxy(address, port, clientWebSocket, payload, wsStream, config);
+  } else {
     // UDP only supports DNS (port 53)
     if (port !== 53) {
       logger.error('VLESS:DISPATCH', `UDP only supports port 53, got port ${port}`);
       throw new Error(`UDP is only supported for DNS on port 53, got port ${port}`);
     }
     logger.debug('VLESS:DISPATCH', 'Dispatching to UDP proxy handler');
-    await handleUdpProxy(serverWebSocket, payload, wsStream, config);
-  } else {
-    logger.debug('VLESS:DISPATCH', 'Dispatching to TCP proxy handler');
-    await handleTcpProxy(serverWebSocket, payload, wsStream, address, port, config);
+    await handleUdpProxy(clientWebSocket, payload, wsStream, config);
+  }
+
+  logger.info('VLESS:PROCESS', `${protocol} proxy completed successfully`);
+}
   }
 
   logger.info('VLESS:PROCESS', `${protocol} proxy completed successfully`);

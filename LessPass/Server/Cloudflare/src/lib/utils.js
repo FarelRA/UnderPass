@@ -12,12 +12,12 @@ import { byteToHex, WS_READY_STATE } from './config.js';
  * Checks for early data in the Sec-WebSocket-Protocol header first,
  * otherwise waits for the first WebSocket message.
  *
- * @param {WebSocket} server - The server-side WebSocket connection.
  * @param {Request} request - The incoming HTTP request with WebSocket upgrade.
+ * @param {WebSocket} server - The server-side WebSocket connection.
  * @returns {Promise<Uint8Array>} The first data chunk.
  * @throws {Error} If WebSocket closes or errors before receiving data.
  */
-export async function getFirstChunk(server, request) {
+export async function getFirstChunk(request, server) {
   // Check for early data in header (0-RTT optimization)
   const earlyDataHeader = request.headers.get('Sec-WebSocket-Protocol');
   if (earlyDataHeader) {

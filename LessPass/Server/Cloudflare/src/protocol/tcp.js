@@ -14,15 +14,15 @@ import { safeCloseWebSocket } from '../lib/utils.js';
  * Attempts a primary connection to the destination, and if it fails or is idle,
  * retries with a relay address as a fallback.
  *
+ * @param {string} destinationAddress - Destination hostname or IP address.
+ * @param {number} destinationPort - Destination port number.
  * @param {WebSocket} clientWebSocket - The client-facing WebSocket connection.
  * @param {Uint8Array} initialPayload - The payload from VLESS header parsing to send to remote.
  * @param {ReadableStream} wsStream - The WebSocket message stream (not yet consumed).
- * @param {string} destinationAddress - Destination hostname or IP address.
- * @param {number} destinationPort - Destination port number.
  * @param {object} config - The request-scoped configuration.
  * @returns {Promise<void>}
  */
-export async function handleTcpProxy(clientWebSocket, initialPayload, wsStream, destinationAddress, destinationPort, config) {
+export async function handleTcpProxy(destinationAddress, destinationPort, clientWebSocket, initialPayload, wsStream, config) {
   // === Attempt Primary Connection ===
   let connection = await testConnection(destinationAddress, destinationPort, initialPayload);
 
