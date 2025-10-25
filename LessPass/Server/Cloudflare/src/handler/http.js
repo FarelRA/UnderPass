@@ -1,6 +1,8 @@
 // =================================================================
 // File: handler/http.js
 // Description: Handles all standard HTTP (non-WebSocket) requests.
+//              Provides /info diagnostic endpoint and masquerades as nginx
+//              for all other paths to hide the service's true nature.
 // =================================================================
 
 import { logger } from '../lib/logger.js';
@@ -26,14 +28,17 @@ const MASQUERADE_RESPONSE = `<!DOCTYPE html><html><head><title>404 Not Found</ti
  */
 export async function handleHttpRequest(request, env, config) {
   const url = new URL(request.url);
+  logger.debug('HTTP:HANDLER', `Processing HTTP request: ${request.method} ${url.pathname}`);
 
   // Route to info endpoint if requested
   if (url.pathname.endsWith('/info')) {
+    logger.info('HTTP:ROUTE', 'Routing to /info diagnostic endpoint');
     return handleInfoRequest(request, env, config);
   }
 
   // Return masquerade 404 for all other paths
-  logger.info('HTTP:MASQUERADE', 'Returning 404 Not Found page');
+  logger.info('HTTP:MASQUERADE', `Returning masquerade 404 for path: ${url.pathname}`);
+  logger.trace('HTTP:MASQUERADE', 'Mimicking nginx 404 page');
   return new Response(MASQUERADE_RESPONSE, {
     status: 404,
     headers: { 'Content-Type': 'text/html' },
@@ -53,19 +58,27 @@ export async function handleHttpRequest(request, env, config) {
  * @returns {Response} JSON response with diagnostic information or 401 Unauthorized.
  */
 function handleInfoRequest(request, env, config) {
-  // === Authenticate Request ===
+  logger.debug('HTTP:INFO', 'Processing /info endpoint request');
+
+  // Authenticate request using Basic Auth
   const authHeader = request.headers.get('Authorization');
+  logger.trace('HTTP:AUTH', `Authorization header present: ${!!authHeader}`);
+  
   const expectedAuth = `Basic ${btoa(':' + config.PASSWORD)}`;
 
   if (authHeader !== expectedAuth) {
     logger.warn('HTTP:AUTH', 'Unauthorized access attempt to /info endpoint');
+    logger.trace('HTTP:AUTH', `Expected: ${expectedAuth.substring(0, 20)}..., Got: ${authHeader?.substring(0, 20) || 'none'}...`);
     return new Response('Unauthorized', {
       status: 401,
       headers: { 'WWW-Authenticate': 'Basic realm="VLESS Worker Info"' },
     });
   }
 
-  // === Build Diagnostic Information ===
+  logger.info('HTTP:AUTH', 'Authentication successful for /info endpoint');
+
+  // Build diagnostic information
+  logger.debug('HTTP:INFO', 'Building diagnostic information');
   const diagnosticInfo = {
     status: 'Ok',
     request: {
@@ -78,7 +91,10 @@ function handleInfoRequest(request, env, config) {
     config,
   };
 
-  // === Return JSON Response ===
+  logger.trace('HTTP:INFO', `Diagnostic info size: ${JSON.stringify(diagnosticInfo).length} bytes`);
+  logger.info('HTTP:INFO', 'Returning diagnostic information');
+
+  // Return JSON response
   return new Response(JSON.stringify(diagnosticInfo, null, 2), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
