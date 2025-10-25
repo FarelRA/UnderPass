@@ -5,7 +5,6 @@
 
 import { connect } from 'cloudflare:sockets';
 import { logger } from '../lib/logger.js';
-import { safeCloseWebSocket, createWritableStream } from '../lib/utils.js';
 
 // === Public API ===
 
@@ -16,32 +15,25 @@ import { safeCloseWebSocket, createWritableStream } from '../lib/utils.js';
  *
  * @param {string} destinationAddress - Destination hostname or IP address.
  * @param {number} destinationPort - Destination port number.
- * @param {WebSocket} clientWebSocket - The client-facing WebSocket connection.
+ * @param {ReadableStream} wsReadable - The WebSocket readable stream.
+ * @param {WritableStream} wsWritable - The WebSocket writable stream.
  * @param {Uint8Array} initialPayload - The payload from VLESS header parsing to send to remote.
- * @param {ReadableStream} wsStream - The WebSocket message stream (not yet consumed).
  * @param {object} config - The request-scoped configuration.
  * @returns {Promise<void>}
  */
-export async function handleTcpProxy(destinationAddress, destinationPort, clientWebSocket, initialPayload, wsStream, config) {
+export async function handleTcpProxy(destinationAddress, destinationPort, wsReadable, wsWritable, initialPayload, config) {
   // === Attempt Primary Connection ===
   let connection = await testConnection(destinationAddress, destinationPort, initialPayload);
 
   if (connection) {
     logger.info('TCP:PROXY', 'Primary connection established successfully');
-    await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, clientWebSocket);
-    safeCloseWebSocket(clientWebSocket);
+    await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsReadable, wsWritable);
     return;
   }
 
   logger.warn('TCP:PROXY', 'Primary connection closed without data exchange');
 
   // === Attempt Relay Connection (Fallback) ===
-  if (!config.RELAY_ADDR) {
-    logger.error('TCP:PROXY', 'No relay address configured, connection failed');
-    clientWebSocket.close(1011, 'Connection failed: No relay');
-    return;
-  }
-
   logger.info('TCP:PROXY', `Attempting relay connection to ${config.RELAY_ADDR}`);
 
   const [relayAddress, relayPortString] = config.RELAY_ADDR.split(':');
@@ -53,13 +45,10 @@ export async function handleTcpProxy(destinationAddress, destinationPort, client
 
   if (connection) {
     logger.info('TCP:PROXY', 'Relay connection established successfully');
-    await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsStream, clientWebSocket);
+    await proxyConnection(connection.remoteReader, connection.remoteWriter, connection.firstResponse, wsReadable, wsWritable);
   } else {
     logger.error('TCP:PROXY', 'Both primary and relay connections failed');
-    clientWebSocket.close(1011, 'Connection failed');
   }
-
-  safeCloseWebSocket(clientWebSocket);
 }
 
 // === Private Helper Functions ===
@@ -110,18 +99,20 @@ async function testConnection(hostname, port, initialPayload) {
  * @param {ReadableStreamDefaultReader} remoteReader - Reader for data from remote socket.
  * @param {WritableStreamDefaultWriter} remoteWriter - Writer for data to remote socket.
  * @param {Uint8Array} firstResponse - The first response from remote socket (already read).
- * @param {ReadableStream} wsStream - The WebSocket message stream from client.
- * @param {WebSocket} clientWebSocket - The client-facing WebSocket.
+ * @param {ReadableStream} wsReadable - The WebSocket readable stream.
+ * @param {WritableStream} wsWritable - The WebSocket writable stream.
  * @returns {Promise<void>}
  */
-async function proxyConnection(remoteReader, remoteWriter, firstResponse, wsStream, clientWebSocket) {
+async function proxyConnection(remoteReader, remoteWriter, firstResponse, wsReadable, wsWritable) {
   // Send the first response back to client immediately
-  clientWebSocket.send(firstResponse);
+  const wsWriter = wsWritable.getWriter();
+  await wsWriter.write(firstResponse);
+  wsWriter.releaseLock();
 
   // Set up bidirectional data pumping
   await Promise.all([
-    pumpReadableToWritable(wsStream.getReader(), remoteWriter), // Client → Remote
-    pumpReadableToWebSocket(remoteReader, clientWebSocket), // Remote → Client
+    pumpReadableToWritable(wsReadable.getReader(), remoteWriter), // Client → Remote
+    pumpReadableToWritable(remoteReader, wsWritable.getWriter()), // Remote → Client
   ]);
 }
 
@@ -143,25 +134,6 @@ async function pumpReadableToWritable(reader, writer) {
   } catch (error) {
     await writer.abort(error).catch(() => {});
     throw error;
-  } finally {
-    reader.releaseLock();
-  }
-}
-
-/**
- * Pumps data from a readable stream to WebSocket.
- *
- * @param {ReadableStreamDefaultReader} reader - The source reader.
- * @param {WebSocket} ws - The destination WebSocket.
- * @returns {Promise<void>}
- */
-async function pumpReadableToWebSocket(reader, ws) {
-  try {
-    while (true) {
-      const { value, done } = await reader.read();
-      if (done) break;
-      ws.send(value);
-    }
   } finally {
     reader.releaseLock();
   }

@@ -4,30 +4,27 @@
 // =================================================================
 
 import { logger } from '../lib/logger.js';
-import { safeCloseWebSocket } from '../lib/utils.js';
 
 // === Public API ===
 
 /**
  * Handles a single DNS query over UDP via DNS-over-HTTPS.
  *
- * @param {WebSocket} clientWebSocket - The client-facing WebSocket connection.
+ * @param {ReadableStream} wsReadable - The WebSocket readable stream.
+ * @param {WritableStream} wsWritable - The WebSocket writable stream.
  * @param {Uint8Array} initialPayload - The initial payload from VLESS header.
- * @param {ReadableStream} wsStream - The WebSocket message stream.
  * @param {object} config - The request-scoped configuration.
  * @returns {Promise<void>}
  */
-export async function handleUdpProxy(clientWebSocket, initialPayload, wsStream, config) {
+export async function handleUdpProxy(wsReadable, wsWritable, initialPayload, config) {
   try {
-    const dnsQuery = await readPacket(clientWebSocket, initialPayload, wsStream);
+    const dnsQuery = await readPacket(initialPayload, wsReadable);
     const dnsResponse = await queryDns(dnsQuery, config);
-    sendResponse(clientWebSocket, dnsResponse);
+    await sendResponse(wsWritable, dnsResponse);
     logger.info('UDP:PROXY', 'DNS query processed successfully');
   } catch (error) {
     logger.error('UDP:PROXY', `Error: ${error.message}`);
   }
-
-  safeCloseWebSocket(clientWebSocket);
 }
 
 // === Private Helper Functions ===
@@ -35,12 +32,11 @@ export async function handleUdpProxy(clientWebSocket, initialPayload, wsStream, 
 /**
  * Reads chunks until a complete DNS packet is assembled.
  *
- * @param {WebSocket} clientWebSocket - The client-facing WebSocket.
  * @param {Uint8Array} initialPayload - The initial payload from VLESS header.
- * @param {ReadableStream} wsStream - The WebSocket message stream.
+ * @param {ReadableStream} wsReadable - The WebSocket readable stream.
  * @returns {Promise<Uint8Array>} The complete DNS packet.
  */
-async function readPacket(clientWebSocket, initialPayload, wsStream) {
+async function readPacket(initialPayload, wsReadable) {
   let buffer = initialPayload;
 
   // Check if initial payload already contains complete packet
@@ -52,7 +48,7 @@ async function readPacket(clientWebSocket, initialPayload, wsStream) {
   }
 
   // Read additional chunks until complete
-  const reader = wsStream.getReader();
+  const reader = wsReadable.getReader();
   try {
     while (true) {
       const { value, done } = await reader.read();
@@ -118,12 +114,15 @@ async function queryDns(dnsQuery, config) {
 /**
  * Sends a DNS response back to the client in VLESS UDP format.
  *
- * @param {WebSocket} clientWebSocket - The client-facing WebSocket.
+ * @param {WritableStream} wsWritable - The WebSocket writable stream.
  * @param {Uint8Array} dnsResponse - The DNS response data.
  */
-function sendResponse(clientWebSocket, dnsResponse) {
+async function sendResponse(wsWritable, dnsResponse) {
   const packet = new Uint8Array(2 + dnsResponse.byteLength);
   new DataView(packet.buffer).setUint16(0, dnsResponse.byteLength);
   packet.set(dnsResponse, 2);
-  clientWebSocket.send(packet);
+  
+  const writer = wsWritable.getWriter();
+  await writer.write(packet);
+  writer.releaseLock();
 }
