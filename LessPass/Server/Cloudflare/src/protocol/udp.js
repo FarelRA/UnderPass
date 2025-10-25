@@ -9,9 +9,7 @@ import { safeCloseWebSocket } from '../lib/utils.js';
 // === Public API ===
 
 /**
- * The main proxying loop for UDP over DNS-over-HTTPS.
- * Processes the initial payload and then continuously reads from the WebSocket stream,
- * forwarding each DNS packet to the DoH server and sending responses back to the client.
+ * Handles a single DNS query over UDP via DNS-over-HTTPS.
  *
  * @param {WebSocket} clientWebSocket - The client-facing WebSocket connection.
  * @param {Uint8Array} initialPayload - The initial payload from VLESS header.
@@ -20,28 +18,13 @@ import { safeCloseWebSocket } from '../lib/utils.js';
  * @returns {Promise<void>}
  */
 export async function handleUdpProxy(clientWebSocket, initialPayload, wsStream, config) {
-  // Process initial payload if present
-  if (initialPayload.byteLength > 0) {
-    await processChunk(initialPayload, clientWebSocket, config);
-  }
-
-  // Set up stream reader
-  const reader = wsStream.getReader();
-
   try {
-    // Continuously process incoming chunks
-    while (true) {
-      const { value, done } = await reader.read();
-
-      if (done) {
-        logger.info('UDP:STREAM', 'Client stream closed');
-        break;
-      }
-
-      await processChunk(value, clientWebSocket, config);
-    }
-  } finally {
-    reader.releaseLock();
+    const dnsQuery = await readPacket(clientWebSocket, initialPayload, wsStream);
+    const dnsResponse = await queryDns(dnsQuery, config);
+    sendResponse(clientWebSocket, dnsResponse);
+    logger.info('UDP:PROXY', 'DNS query processed successfully');
+  } catch (error) {
+    logger.error('UDP:PROXY', `Error: ${error.message}`);
   }
 
   safeCloseWebSocket(clientWebSocket);
@@ -50,55 +33,69 @@ export async function handleUdpProxy(clientWebSocket, initialPayload, wsStream, 
 // === Private Helper Functions ===
 
 /**
- * Processes a single UDP chunk containing one or more DNS packets.
- * Each chunk follows the VLESS UDP format: [2-byte length][DNS packet][2-byte length][DNS packet]...
+ * Reads chunks until a complete DNS packet is assembled.
  *
- * @param {Uint8Array} chunk - The chunk data to process.
  * @param {WebSocket} clientWebSocket - The client-facing WebSocket.
- * @param {object} config - The request-scoped configuration.
- * @returns {Promise<void>}
+ * @param {Uint8Array} initialPayload - The initial payload from VLESS header.
+ * @param {ReadableStream} wsStream - The WebSocket message stream.
+ * @returns {Promise<Uint8Array>} The complete DNS packet.
  */
-async function processChunk(chunk, clientWebSocket, config) {
-  const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+async function readPacket(clientWebSocket, initialPayload, wsStream) {
+  let buffer = initialPayload;
 
-  let offset = 0;
-
-  // Process all packets in the chunk
-  while (offset < chunk.byteLength) {
-    // === Read Packet Length (2 bytes) ===
-    if (offset + 2 > chunk.byteLength) {
-      logger.warn('UDP:PARSE', 'Incomplete length header in chunk');
-      break;
+  // Check if initial payload already contains complete packet
+  if (buffer.byteLength >= 2) {
+    const packetLength = new DataView(buffer.buffer, buffer.byteOffset).getUint16(0);
+    if (buffer.byteLength >= 2 + packetLength) {
+      return buffer.subarray(2, 2 + packetLength);
     }
+  }
 
-    const packetLength = view.getUint16(offset);
-    offset += 2;
+  // Read additional chunks until complete
+  const reader = wsStream.getReader();
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) {
+        throw new Error('WebSocket closed before complete packet received');
+      }
 
-    // === Validate Packet Data ===
-    if (offset + packetLength > chunk.byteLength) {
-      logger.warn('UDP:PARSE', 'Incomplete packet payload in chunk');
-      break;
+      buffer = concatBuffers(buffer, value);
+
+      if (buffer.byteLength >= 2) {
+        const packetLength = new DataView(buffer.buffer, buffer.byteOffset).getUint16(0);
+        if (buffer.byteLength >= 2 + packetLength) {
+          return buffer.subarray(2, 2 + packetLength);
+        }
+      }
     }
-
-    // === Extract and Process DNS Packet ===
-    const dnsPacket = chunk.subarray(offset, offset + packetLength);
-    await processDnsPacket(dnsPacket, clientWebSocket, config);
-
-    offset += packetLength;
+  } finally {
+    reader.releaseLock();
   }
 }
 
 /**
- * Processes a single DNS packet by forwarding it to the DoH server
- * and sending the VLESS-formatted response back to the client.
+ * Concatenates two Uint8Arrays.
  *
- * @param {Uint8Array} dnsQuery - The raw DNS query payload.
- * @param {WebSocket} clientWebSocket - The client-facing WebSocket.
- * @param {object} config - The request-scoped configuration containing DOH_URL.
- * @returns {Promise<void>}
+ * @param {Uint8Array} a - First buffer.
+ * @param {Uint8Array} b - Second buffer.
+ * @returns {Uint8Array} Combined buffer.
  */
-async function processDnsPacket(dnsQuery, clientWebSocket, config) {
-  // === Forward DNS Query to DoH Server ===
+function concatBuffers(a, b) {
+  const result = new Uint8Array(a.byteLength + b.byteLength);
+  result.set(a);
+  result.set(b, a.byteLength);
+  return result;
+}
+
+/**
+ * Queries the DoH server with a DNS packet.
+ *
+ * @param {Uint8Array} dnsQuery - The DNS query payload.
+ * @param {object} config - Configuration containing DOH_URL.
+ * @returns {Promise<Uint8Array>} The DNS response.
+ */
+async function queryDns(dnsQuery, config) {
   const response = await fetch(config.DOH_URL, {
     method: 'POST',
     headers: { 'content-type': 'application/dns-message' },
@@ -106,25 +103,27 @@ async function processDnsPacket(dnsQuery, clientWebSocket, config) {
   });
 
   if (!response.ok) {
-    logger.error('UDP:DOH', `DoH request failed with status ${response.status}`);
-    return;
+    throw new Error(`DoH request failed with status ${response.status}`);
   }
 
-  // === Read DNS Response ===
   const dnsResult = new Uint8Array(await response.arrayBuffer());
-  const resultSize = dnsResult.byteLength;
 
-  if (resultSize === 0) {
-    logger.warn('UDP:DOH', 'DoH returned empty response');
-    return;
+  if (dnsResult.byteLength === 0) {
+    throw new Error('DoH returned empty response');
   }
 
-  // === Format Response in VLESS UDP Format ===
-  // Format: [2-byte length][DNS response data]
-  const responsePacket = new Uint8Array(2 + resultSize);
-  new DataView(responsePacket.buffer).setUint16(0, resultSize);
-  responsePacket.set(dnsResult, 2);
+  return dnsResult;
+}
 
-  // === Send Response Back to Client ===
-  clientWebSocket.send(responsePacket);
+/**
+ * Sends a DNS response back to the client in VLESS UDP format.
+ *
+ * @param {WebSocket} clientWebSocket - The client-facing WebSocket.
+ * @param {Uint8Array} dnsResponse - The DNS response data.
+ */
+function sendResponse(clientWebSocket, dnsResponse) {
+  const packet = new Uint8Array(2 + dnsResponse.byteLength);
+  new DataView(packet.buffer).setUint16(0, dnsResponse.byteLength);
+  packet.set(dnsResponse, 2);
+  clientWebSocket.send(packet);
 }

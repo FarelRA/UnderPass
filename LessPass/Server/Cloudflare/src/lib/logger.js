@@ -3,7 +3,7 @@
 // Description: Structured logging utility.
 // =================================================================
 
-export const LOG_LEVELS = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, TRACE: 4 };
+const LOG_LEVELS = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, TRACE: 4 };
 
 function formatLogMessage(level, section, message, context, optionalParams) {
   const { logId = 'N/A', clientIP = 'N/A', remoteAddress, remotePort } = context;
@@ -16,6 +16,13 @@ export const logger = {
   logLevel: LOG_LEVELS.INFO,
   context: {},
 
+  setLogLevel(level) {
+    const upperLevel = String(level).toUpperCase();
+    if (upperLevel in LOG_LEVELS) {
+      this.logLevel = LOG_LEVELS[upperLevel];
+    }
+  },
+
   setLogContext(context) {
     this.context = context;
   },
@@ -24,23 +31,9 @@ export const logger = {
     Object.assign(this.context, context);
   },
 
-  setLogLevel(level) {
-    if (!level) return;
-    const upperLevel = String(level).toUpperCase();
-    if (upperLevel in LOG_LEVELS) {
-      this.logLevel = LOG_LEVELS[upperLevel];
-    }
-  },
-
-  debug(section, message, ...optionalParams) {
-    if (this.logLevel >= LOG_LEVELS.DEBUG) {
-      console.debug(formatLogMessage('DEBUG', section, message, this.context, optionalParams));
-    }
-  },
-
-  info(section, message, ...optionalParams) {
-    if (this.logLevel >= LOG_LEVELS.INFO) {
-      console.info(formatLogMessage('INFO', section, message, this.context, optionalParams));
+  error(section, message, ...optionalParams) {
+    if (this.logLevel >= LOG_LEVELS.ERROR) {
+      console.error(formatLogMessage('ERROR', section, message, this.context, optionalParams));
     }
   },
 
@@ -50,9 +43,15 @@ export const logger = {
     }
   },
 
-  error(section, message, ...optionalParams) {
-    if (this.logLevel >= LOG_LEVELS.ERROR) {
-      console.error(formatLogMessage('ERROR', section, message, this.context, optionalParams));
+  info(section, message, ...optionalParams) {
+    if (this.logLevel >= LOG_LEVELS.INFO) {
+      console.info(formatLogMessage('INFO', section, message, this.context, optionalParams));
+    }
+  },
+
+  debug(section, message, ...optionalParams) {
+    if (this.logLevel >= LOG_LEVELS.DEBUG) {
+      console.debug(formatLogMessage('DEBUG', section, message, this.context, optionalParams));
     }
   },
 

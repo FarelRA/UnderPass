@@ -5,7 +5,7 @@
 
 import { connect } from 'cloudflare:sockets';
 import { logger } from '../lib/logger.js';
-import { safeCloseWebSocket } from '../lib/utils.js';
+import { safeCloseWebSocket, createWritableStream } from '../lib/utils.js';
 
 // === Public API ===
 
@@ -120,49 +120,49 @@ async function proxyConnection(remoteReader, remoteWriter, firstResponse, wsStre
 
   // Set up bidirectional data pumping
   await Promise.all([
-    pump(wsStream.getReader(), remoteWriter), // Client → Remote
-    pump(remoteReader, clientWebSocket), // Remote → Client
+    pumpReadableToWritable(wsStream.getReader(), remoteWriter), // Client → Remote
+    pumpReadableToWebSocket(remoteReader, clientWebSocket), // Remote → Client
   ]);
 }
 
 /**
- * Pumps data from a reader to a writer (or WebSocket).
- * Continuously reads from the source and writes to the destination until the stream ends.
+ * Pumps data from a readable stream to a writable stream.
  *
- * @param {ReadableStreamDefaultReader} reader - The source reader to read data from.
- * @param {WritableStreamDefaultWriter|WebSocket} writer - The destination writer or WebSocket.
+ * @param {ReadableStreamDefaultReader} reader - The source reader.
+ * @param {WritableStreamDefaultWriter} writer - The destination writer.
  * @returns {Promise<void>}
- * @throws {Error} If pumping fails.
  */
-async function pump(reader, writer) {
-  const isWebSocket = writer.send !== undefined;
-
+async function pumpReadableToWritable(reader, writer) {
   try {
     while (true) {
       const { value, done } = await reader.read();
-
       if (done) break;
-
-      // Send data to destination
-      if (isWebSocket) {
-        writer.send(value);
-      } else {
-        await writer.write(value);
-      }
+      await writer.write(value);
     }
-
-    // Close writer if it's a stream (not WebSocket)
-    if (!isWebSocket) {
-      await writer.close();
-    }
+    await writer.close();
   } catch (error) {
-    // Abort writer on error (if it's a stream)
-    if (!isWebSocket) {
-      await writer.abort(error).catch(() => {});
-    }
+    await writer.abort(error).catch(() => {});
     throw error;
   } finally {
-    // Always release the reader lock
+    reader.releaseLock();
+  }
+}
+
+/**
+ * Pumps data from a readable stream to WebSocket.
+ *
+ * @param {ReadableStreamDefaultReader} reader - The source reader.
+ * @param {WebSocket} ws - The destination WebSocket.
+ * @returns {Promise<void>}
+ */
+async function pumpReadableToWebSocket(reader, ws) {
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      ws.send(value);
+    }
+  } finally {
     reader.releaseLock();
   }
 }

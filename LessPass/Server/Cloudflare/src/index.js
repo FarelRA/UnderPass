@@ -34,8 +34,7 @@ export default {
     logger.debug('WORKER:CONFIG', `Setting log level to ${config.LOG_LEVEL}`);
 
     // === Route Based on Request Type ===
-    const upgradeHeader = request.headers.get('Upgrade');
-    if (upgradeHeader === 'websocket') {
+    if (request.headers.get('Upgrade') === 'websocket') {
       logger.info('WORKER:ROUTE', 'Routing WebSocket request to VLESS handler');
       return handleVlessRequest(request, config);
     }

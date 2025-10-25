@@ -7,7 +7,7 @@ import { VLESS } from '../lib/config.js';
 import { logger } from '../lib/logger.js';
 import { handleTcpProxy } from '../protocol/tcp.js';
 import { handleUdpProxy } from '../protocol/udp.js';
-import { getFirstChunk, createConsumableStream, stringifyUUID } from '../lib/utils.js';
+import { getFirstChunk, createReadableStream, stringifyUUID } from '../lib/utils.js';
 
 // === Module-Level Constants ===
 const textDecoder = new TextDecoder();
@@ -60,8 +60,8 @@ export function processVlessHeader(chunk) {
     throw new Error(`Invalid VLESS header: insufficient length. Got ${chunk.byteLength}, expected at least ${VLESS.MIN_HEADER_LENGTH}.`);
   }
 
-  const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
   let offset = 0;
+  const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
 
   // === Parse VLESS Version (1 byte) ===
   const vlessVersion = chunk.subarray(offset, VLESS.VERSION_LENGTH);
@@ -75,34 +75,19 @@ export function processVlessHeader(chunk) {
   const addonLength = chunk[offset];
   offset += 1 + addonLength;
 
-  if (offset >= chunk.byteLength) {
-    throw new Error('Header truncated after addon section');
-  }
-
   // === Parse Command (1 byte) ===
   const command = chunk[offset++];
   const protocol = command === VLESS.COMMAND.TCP ? 'TCP' : command === VLESS.COMMAND.UDP ? 'UDP' : null;
 
-  if (!protocol) {
-    throw new Error(`Unsupported VLESS command: ${command}`);
-  }
-
   // === Parse Port (2 bytes, big-endian) ===
-  if (offset + 2 > chunk.byteLength) {
-    throw new Error('Header truncated before port');
-  }
-
   const port = view.getUint16(offset);
   offset += 2;
 
   // === Parse Address (variable length based on type) ===
-  if (offset >= chunk.byteLength) {
-    throw new Error('Header truncated before address type');
-  }
-
   const addressType = chunk[offset++];
-  const address = parseAddress(chunk, view, addressType, offset);
-  offset = address.newOffset;
+  const parsedAddress = parseAddress(chunk, view, addressType, offset);
+  const address = parsedAddress.value;
+  offset = parsedAddress.newOffset;
 
   // === Extract Remaining Payload ===
   const payload = chunk.subarray(offset);
@@ -111,7 +96,7 @@ export function processVlessHeader(chunk) {
     vlessVersion,
     userID,
     protocol,
-    address: address.value,
+    address,
     port,
     payload,
   };
@@ -138,8 +123,8 @@ async function processVlessConnection(request, clientWebSocket, config) {
   logger.debug('VLESS:STREAM', `Received first chunk: ${firstChunk.byteLength} bytes`);
 
   // === Step 2: Create Stream for Subsequent Data ===
-  const wsStream = createConsumableStream(clientWebSocket);
-  logger.debug('VLESS:STREAM', 'Created consumable stream');
+  const wsStream = createReadableStream(clientWebSocket);
+  logger.debug('VLESS:STREAM', 'Created readable stream');
 
   // === Step 3: Parse VLESS Header ===
   logger.debug('VLESS:HEADER', 'Parsing VLESS header');
@@ -196,31 +181,17 @@ async function processVlessConnection(request, clientWebSocket, config) {
 function parseAddress(chunk, view, addressType, offset) {
   switch (addressType) {
     case VLESS.ADDRESS_TYPE.IPV4: {
-      if (offset + 4 > chunk.byteLength) {
-        throw new Error('Insufficient data for IPv4 address');
-      }
       const address = `${chunk[offset]}.${chunk[offset + 1]}.${chunk[offset + 2]}.${chunk[offset + 3]}`;
       return { value: address, newOffset: offset + 4 };
     }
 
     case VLESS.ADDRESS_TYPE.FQDN: {
-      if (offset >= chunk.byteLength) {
-        throw new Error('Insufficient data for FQDN length');
-      }
       const domainLength = chunk[offset++];
-
-      if (offset + domainLength > chunk.byteLength) {
-        throw new Error('Insufficient data for FQDN');
-      }
       const address = textDecoder.decode(chunk.subarray(offset, offset + domainLength));
       return { value: address, newOffset: offset + domainLength };
     }
 
     case VLESS.ADDRESS_TYPE.IPV6: {
-      if (offset + 16 > chunk.byteLength) {
-        throw new Error('Insufficient data for IPv6 address');
-      }
-      // Build IPv6 address string directly
       const address = `[${view.getUint16(offset).toString(16)}:${view.getUint16(offset + 2).toString(16)}:${view
         .getUint16(offset + 4)
         .toString(16)}:${view.getUint16(offset + 6).toString(16)}:${view.getUint16(offset + 8).toString(16)}:${view
