@@ -35,35 +35,28 @@ export async function readFirstChunk(request, serverSocket) {
   // Wait for first WebSocket message using event listeners
   logger.debug('UTILS:CHUNK', 'Waiting for first WebSocket message');
   return new Promise((resolve, reject) => {
-    const onMessage = (event) => {
-      cleanup();
+    const controller = new AbortController();
+    const { signal } = controller;
+
+    serverSocket.addEventListener('message', (event) => {
+      controller.abort();
       const chunk = new Uint8Array(event.data);
       logger.debug('UTILS:CHUNK', `First message received: ${chunk.byteLength} bytes`);
       resolve(chunk);
-    };
+    }, { once: true, signal });
 
-    const onClose = () => {
-      cleanup();
+    serverSocket.addEventListener('close', () => {
+      controller.abort();
       const error = 'WebSocket closed before first chunk';
       logger.error('UTILS:CHUNK', error);
       reject(new Error(error));
-    };
+    }, { signal });
 
-    const onError = (err) => {
-      cleanup();
+    serverSocket.addEventListener('error', (err) => {
+      controller.abort();
       logger.error('UTILS:CHUNK', `WebSocket error: ${err?.message || 'Unknown error'}`);
       reject(err || new Error('WebSocket error'));
-    };
-
-    const cleanup = () => {
-      serverSocket.removeEventListener('message', onMessage);
-      serverSocket.removeEventListener('close', onClose);
-      serverSocket.removeEventListener('error', onError);
-    };
-
-    serverSocket.addEventListener('message', onMessage, { once: true });
-    serverSocket.addEventListener('close', onClose, { once: true });
-    serverSocket.addEventListener('error', onError, { once: true });
+    }, { signal });
   });
 }
 
@@ -124,6 +117,31 @@ export function closeWebSocket(socket) {
   } catch (error) {
     logger.warn('UTILS:WEBSOCKET', `Error closing WebSocket: ${error.message}`);
   }
+}
+
+/**
+ * Checks if an error is an expected disconnect/close error.
+ * These errors occur during normal operation when clients disconnect.
+ *
+ * @param {Error} error - The error to check.
+ * @returns {boolean} True if the error is expected (normal disconnect).
+ */
+export function isExpectedError(error) {
+  if (!error || !error.message) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  const expectedPatterns = [
+    'closed',
+    'abort',
+    'disconnect',
+    'websocket closed',
+    'stream closed',
+    'connection closed',
+  ];
+
+  return expectedPatterns.some(pattern => message.includes(pattern));
 }
 
 // === Data Conversion Utilities ===

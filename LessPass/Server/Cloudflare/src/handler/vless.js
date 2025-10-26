@@ -9,7 +9,7 @@ import { VLESS } from '../lib/config.js';
 import { logger } from '../lib/logger.js';
 import { proxyTcp } from '../protocol/tcp.js';
 import { proxyUdp } from '../protocol/udp.js';
-import { readFirstChunk, createStreams, uuidToString, closeWebSocket } from '../lib/utils.js';
+import { readFirstChunk, createStreams, uuidToString, closeWebSocket, isExpectedError } from '../lib/utils.js';
 
 // === Constants ===
 
@@ -42,10 +42,7 @@ export function handleVless(request, config) {
       closeWebSocket(serverSocket);
     })
     .catch((err) => {
-      // Check if it's a normal disconnect
-      const isNormalDisconnect = err.message?.includes('closed') || err.message?.includes('WebSocket closed');
-      
-      if (isNormalDisconnect) {
+      if (isExpectedError(err)) {
         logger.debug('VLESS:CLEANUP', 'Client disconnected');
       } else {
         logger.error('VLESS:ERROR', `Connection failed: ${err.message}`);
