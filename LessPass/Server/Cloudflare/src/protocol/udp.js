@@ -126,14 +126,8 @@ async function queryDns(query, config) {
 
     logger.trace('UDP:DOH', `DoH response status: ${response.status}`);
     const result = new Uint8Array(await response.arrayBuffer());
-
-    if (result.byteLength === 0) {
-      const error = 'DoH returned empty response';
-      logger.error('UDP:DOH', error);
-      throw new Error(error);
-    }
-
     logger.debug('UDP:DOH', `DoH response received: ${result.byteLength} bytes`);
+
     return result;
   } catch (error) {
     logger.error('UDP:DOH', `DoH query failed: ${error.message}`);
