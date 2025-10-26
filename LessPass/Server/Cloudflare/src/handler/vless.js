@@ -9,7 +9,7 @@ import { VLESS } from '../lib/config.js';
 import { logger } from '../lib/logger.js';
 import { proxyTcp } from '../protocol/tcp.js';
 import { proxyUdp } from '../protocol/udp.js';
-import { readFirstChunk, createStreams, uuidToString } from '../lib/utils.js';
+import { readFirstChunk, createStreams, uuidToString, closeWebSocket } from '../lib/utils.js';
 
 // === Constants ===
 
@@ -36,10 +36,16 @@ export function handleVless(request, config) {
   logger.debug('VLESS:WEBSOCKET', 'WebSocket connection accepted');
 
   logger.info('VLESS:PROCESS', 'Starting VLESS connection processing');
-  processVless(request, serverSocket, config).catch((err) => {
-    logger.error('VLESS:ERROR', `Connection failed: ${err.message}`);
-    serverSocket.close(1011, `ERROR: ${err.message}`);
-  });
+  processVless(request, serverSocket, config)
+    .then(() => {
+      logger.debug('VLESS:CLEANUP', 'Processing completed, closing WebSocket');
+      closeWebSocket(serverSocket);
+    })
+    .catch((err) => {
+      logger.error('VLESS:ERROR', `Connection failed: ${err.message}`);
+      serverSocket.close(1011, `ERROR: ${err.message}`);
+      closeWebSocket(serverSocket);
+    });
 
   logger.debug('VLESS:HANDLER', 'Returning 101 Switching Protocols response');
   return new Response(null, { status: 101, webSocket: clientSocket });
