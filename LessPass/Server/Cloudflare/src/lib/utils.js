@@ -35,34 +35,35 @@ export async function readFirstChunk(request, serverSocket) {
   // Wait for first WebSocket message using event listeners
   logger.debug('UTILS:CHUNK', 'Waiting for first WebSocket message');
   return new Promise((resolve, reject) => {
-    serverSocket.addEventListener(
-      'message',
-      (event) => {
-        const chunk = new Uint8Array(event.data);
-        logger.debug('UTILS:CHUNK', `First message received: ${chunk.byteLength} bytes`);
-        resolve(chunk);
-      },
-      { once: true }
-    );
+    const onMessage = (event) => {
+      cleanup();
+      const chunk = new Uint8Array(event.data);
+      logger.debug('UTILS:CHUNK', `First message received: ${chunk.byteLength} bytes`);
+      resolve(chunk);
+    };
 
-    serverSocket.addEventListener(
-      'close',
-      () => {
-        const error = 'WebSocket closed before first chunk';
-        logger.error('UTILS:CHUNK', error);
-        reject(new Error(error));
-      },
-      { once: true }
-    );
+    const onClose = () => {
+      cleanup();
+      const error = 'WebSocket closed before first chunk';
+      logger.error('UTILS:CHUNK', error);
+      reject(new Error(error));
+    };
 
-    serverSocket.addEventListener(
-      'error',
-      (err) => {
-        logger.error('UTILS:CHUNK', `WebSocket error: ${err?.message || 'Unknown error'}`);
-        reject(err || new Error('WebSocket error'));
-      },
-      { once: true }
-    );
+    const onError = (err) => {
+      cleanup();
+      logger.error('UTILS:CHUNK', `WebSocket error: ${err?.message || 'Unknown error'}`);
+      reject(err || new Error('WebSocket error'));
+    };
+
+    const cleanup = () => {
+      serverSocket.removeEventListener('message', onMessage);
+      serverSocket.removeEventListener('close', onClose);
+      serverSocket.removeEventListener('error', onError);
+    };
+
+    serverSocket.addEventListener('message', onMessage, { once: true });
+    serverSocket.addEventListener('close', onClose, { once: true });
+    serverSocket.addEventListener('error', onError, { once: true });
   });
 }
 
