@@ -42,8 +42,16 @@ export function handleVless(request, config) {
       closeWebSocket(serverSocket);
     })
     .catch((err) => {
-      logger.error('VLESS:ERROR', `Connection failed: ${err.message}`);
-      serverSocket.close(1011, `ERROR: ${err.message}`);
+      // Check if it's a normal disconnect
+      const isNormalDisconnect = err.message?.includes('closed') || err.message?.includes('WebSocket closed');
+      
+      if (isNormalDisconnect) {
+        logger.debug('VLESS:CLEANUP', 'Client disconnected');
+      } else {
+        logger.error('VLESS:ERROR', `Connection failed: ${err.message}`);
+        serverSocket.close(1011, `ERROR: ${err.message}`);
+      }
+      
       closeWebSocket(serverSocket);
     });
 
