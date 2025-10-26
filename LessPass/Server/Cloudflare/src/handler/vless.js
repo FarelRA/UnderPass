@@ -43,12 +43,12 @@ export function handleVless(request, config) {
     })
     .catch((err) => {
       if (isExpectedError(err)) {
-        logger.debug('VLESS:CLEANUP', 'Client disconnected');
+        logger.info('VLESS:CLEANUP', 'Client disconnected');
       } else {
         logger.error('VLESS:ERROR', `Connection failed: ${err.message}`);
         serverSocket.close(1011, `ERROR: ${err.message}`);
       }
-      
+
       closeWebSocket(serverSocket);
     });
 
