@@ -33,7 +33,7 @@ export async function handleHttp(request, env, config) {
   // Route to info endpoint if requested
   if (url.pathname.endsWith('/info')) {
     logger.info('HTTP:ROUTE', 'Routing to /info diagnostic endpoint');
-    return handleInfo(request, env, config);
+    return processInfo(request, env, config);
   }
 
   // Return masquerade 404 for all other paths
@@ -48,7 +48,7 @@ export async function handleHttp(request, env, config) {
 // === Private Helper Functions ===
 
 /**
- * Handles requests to the "/info" endpoint.
+ * Processes requests to the "/info" endpoint.
  * Provides diagnostic information about the request and configuration.
  * Requires Basic Authentication using the configured password.
  *
@@ -57,7 +57,7 @@ export async function handleHttp(request, env, config) {
  * @param {object} config - The request-scoped configuration.
  * @returns {Response} JSON response with diagnostic information or 401 Unauthorized.
  */
-function handleInfo(request, env, config) {
+function processInfo(request, env, config) {
   logger.debug('HTTP:INFO', 'Processing /info endpoint request');
 
   // Authenticate request using Basic Auth
