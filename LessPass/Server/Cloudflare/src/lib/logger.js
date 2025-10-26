@@ -20,14 +20,14 @@ const LOG_LEVELS = { ERROR: 0, WARN: 1, INFO: 2, DEBUG: 3, TRACE: 4 };
  * @param {string} section - The code section/module generating the log.
  * @param {string} message - The log message.
  * @param {object} context - Contextual information (logId, clientIP, remoteAddress, remotePort).
- * @param {Array} optionalParams - Additional parameters to append to the message.
+ * @param {Array} params - Additional parameters to append to the message.
  * @returns {string} Formatted log message.
  */
-function formatLogMessage(level, section, message, context, optionalParams) {
+function formatMessage(level, section, message, context, params) {
   const { logId = 'N/A', clientIP = 'N/A', remoteAddress, remotePort } = context;
   const remote = remoteAddress && remotePort ? `[Remote: ${remoteAddress}:${remotePort}] ` : '';
-  const optional = optionalParams.length ? ` ${optionalParams.join(' ')}` : '';
-  return `[${level}] [${logId}] [${section}] [Client: ${clientIP}] ${remote}${message}${optional}`;
+  const additional = params.length ? ` ${params.join(' ')}` : '';
+  return `[${level}] [${logId}] [${section}] [Client: ${clientIP}] ${remote}${message}${additional}`;
 }
 
 /**
@@ -55,9 +55,9 @@ export const logger = {
    * @param {string} level - The log level (ERROR, WARN, INFO, DEBUG, TRACE).
    */
   setLogLevel(level) {
-    const upperLevel = String(level).toUpperCase();
-    if (upperLevel in LOG_LEVELS) {
-      this.logLevel = LOG_LEVELS[upperLevel];
+    const upper = String(level).toUpperCase();
+    if (upper in LOG_LEVELS) {
+      this.logLevel = LOG_LEVELS[upper];
     }
   },
 
@@ -87,11 +87,11 @@ export const logger = {
    *
    * @param {string} section - The code section generating the log.
    * @param {string} message - The error message.
-   * @param {...any} optionalParams - Additional parameters.
+   * @param {...any} params - Additional parameters.
    */
-  error(section, message, ...optionalParams) {
+  error(section, message, ...params) {
     if (this.logLevel >= LOG_LEVELS.ERROR) {
-      console.error(formatLogMessage('ERROR', section, message, this.context, optionalParams));
+      console.error(formatMessage('ERROR', section, message, this.context, params));
     }
   },
 
@@ -101,11 +101,11 @@ export const logger = {
    *
    * @param {string} section - The code section generating the log.
    * @param {string} message - The warning message.
-   * @param {...any} optionalParams - Additional parameters.
+   * @param {...any} params - Additional parameters.
    */
-  warn(section, message, ...optionalParams) {
+  warn(section, message, ...params) {
     if (this.logLevel >= LOG_LEVELS.WARN) {
-      console.warn(formatLogMessage('WARN', section, message, this.context, optionalParams));
+      console.warn(formatMessage('WARN', section, message, this.context, params));
     }
   },
 
@@ -115,11 +115,11 @@ export const logger = {
    *
    * @param {string} section - The code section generating the log.
    * @param {string} message - The info message.
-   * @param {...any} optionalParams - Additional parameters.
+   * @param {...any} params - Additional parameters.
    */
-  info(section, message, ...optionalParams) {
+  info(section, message, ...params) {
     if (this.logLevel >= LOG_LEVELS.INFO) {
-      console.info(formatLogMessage('INFO', section, message, this.context, optionalParams));
+      console.info(formatMessage('INFO', section, message, this.context, params));
     }
   },
 
@@ -129,11 +129,11 @@ export const logger = {
    *
    * @param {string} section - The code section generating the log.
    * @param {string} message - The debug message.
-   * @param {...any} optionalParams - Additional parameters.
+   * @param {...any} params - Additional parameters.
    */
-  debug(section, message, ...optionalParams) {
+  debug(section, message, ...params) {
     if (this.logLevel >= LOG_LEVELS.DEBUG) {
-      console.debug(formatLogMessage('DEBUG', section, message, this.context, optionalParams));
+      console.debug(formatMessage('DEBUG', section, message, this.context, params));
     }
   },
 
@@ -143,11 +143,11 @@ export const logger = {
    *
    * @param {string} section - The code section generating the log.
    * @param {string} message - The trace message.
-   * @param {...any} optionalParams - Additional parameters.
+   * @param {...any} params - Additional parameters.
    */
-  trace(section, message, ...optionalParams) {
+  trace(section, message, ...params) {
     if (this.logLevel >= LOG_LEVELS.TRACE) {
-      console.log(formatLogMessage('TRACE', section, message, this.context, optionalParams));
+      console.log(formatMessage('TRACE', section, message, this.context, params));
     }
   },
 };
