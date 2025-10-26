@@ -18,7 +18,7 @@ const MASQUERADE_RESPONSE = `<!DOCTYPE html><html><head><title>404 Not Found</ti
 // === Public API ===
 
 /**
- * Main HTTP request handler.
+ * Handles HTTP requests.
  * Routes requests to the /info endpoint for diagnostics, or returns a masquerading 404 page.
  *
  * @param {Request} request - The incoming HTTP request.
@@ -26,14 +26,14 @@ const MASQUERADE_RESPONSE = `<!DOCTYPE html><html><head><title>404 Not Found</ti
  * @param {object} config - The request-scoped configuration.
  * @returns {Promise<Response>} The HTTP response.
  */
-export async function handleHttpRequest(request, env, config) {
+export async function handleHttp(request, env, config) {
   const url = new URL(request.url);
   logger.debug('HTTP:HANDLER', `Processing HTTP request: ${request.method} ${url.pathname}`);
 
   // Route to info endpoint if requested
   if (url.pathname.endsWith('/info')) {
     logger.info('HTTP:ROUTE', 'Routing to /info diagnostic endpoint');
-    return handleInfoRequest(request, env, config);
+    return handleInfo(request, env, config);
   }
 
   // Return masquerade 404 for all other paths
@@ -57,7 +57,7 @@ export async function handleHttpRequest(request, env, config) {
  * @param {object} config - The request-scoped configuration.
  * @returns {Response} JSON response with diagnostic information or 401 Unauthorized.
  */
-function handleInfoRequest(request, env, config) {
+function handleInfo(request, env, config) {
   logger.debug('HTTP:INFO', 'Processing /info endpoint request');
 
   // Authenticate request using Basic Auth
@@ -79,7 +79,7 @@ function handleInfoRequest(request, env, config) {
 
   // Build diagnostic information
   logger.debug('HTTP:INFO', 'Building diagnostic information');
-  const diagnosticInfo = {
+  const info = {
     status: 'Ok',
     request: {
       method: request.method,
@@ -91,11 +91,11 @@ function handleInfoRequest(request, env, config) {
     config,
   };
 
-  logger.trace('HTTP:INFO', `Diagnostic info size: ${JSON.stringify(diagnosticInfo).length} bytes`);
+  logger.trace('HTTP:INFO', `Diagnostic info size: ${JSON.stringify(info).length} bytes`);
   logger.info('HTTP:INFO', 'Returning diagnostic information');
 
   // Return JSON response
-  return new Response(JSON.stringify(diagnosticInfo, null, 2), {
+  return new Response(JSON.stringify(info, null, 2), {
     status: 200,
     headers: { 'Content-Type': 'application/json' },
   });

@@ -3,10 +3,10 @@
 // Description: Main Cloudflare Worker entry point.
 // =================================================================
 
-import { initializeConfig } from './lib/config.js';
+import { buildConfig } from './lib/config.js';
 import { logger, generateLogId } from './lib/logger.js';
-import { handleHttpRequest } from './handler/http.js';
-import { handleVlessRequest } from './handler/vless.js';
+import { handleHttp } from './handler/http.js';
+import { handleVless } from './handler/vless.js';
 
 export default {
   /**
@@ -28,18 +28,18 @@ export default {
     const url = new URL(request.url);
     logger.debug('WORKER:URL', `Request URL: ${url.host}${url.pathname}`);
 
-    // Initialize configuration from URL params and environment
-    const config = initializeConfig(url, env);
+    // Build configuration from URL params and environment
+    const config = buildConfig(url, env);
     logger.setLogLevel(config.LOG_LEVEL);
     logger.debug('WORKER:CONFIG', `Log level set to ${config.LOG_LEVEL}`);
 
     // Route based on request type (WebSocket vs HTTP)
     if (request.headers.get('Upgrade') === 'websocket') {
       logger.info('WORKER:ROUTE', 'Routing to VLESS WebSocket handler');
-      return handleVlessRequest(request, config);
+      return handleVless(request, config);
     }
 
     logger.info('WORKER:ROUTE', 'Routing to HTTP handler');
-    return handleHttpRequest(request, env, config);
+    return handleHttp(request, env, config);
   },
 };

@@ -13,7 +13,7 @@
  * 
  * SECURITY NOTE: Change USER_ID and PASSWORD in production!
  */
-const defaultConfig = {
+const defaults = {
   USER_ID: '86c50e3a-5b87-49dd-bd20-03c7f2735e40', // VLESS UUID for authentication (CHANGE IN PRODUCTION)
   PASSWORD: 'password', // Password for /info endpoint (CHANGE IN PRODUCTION)
   RELAY_ADDR: 'bpb.yousef.isegaro.com:443', // Relay address for retry mechanism
@@ -24,7 +24,7 @@ const defaultConfig = {
 // === Configuration Initialization ===
 
 /**
- * Creates a final configuration object for a single request.
+ * Builds a final configuration object for a single request.
  * Merges defaults, environment variables, and URL parameters with the following priority:
  * 1. URL query parameters (highest priority)
  * 2. Environment variables
@@ -36,17 +36,17 @@ const defaultConfig = {
  *
  * @example
  * // URL: https://worker.example.com/?log=DEBUG&relay=custom.relay.com:8443
- * const config = initializeConfig(url, env);
+ * const config = buildConfig(url, env);
  * // config.LOG_LEVEL = 'DEBUG' (from URL)
  * // config.RELAY_ADDR = 'custom.relay.com:8443' (from URL)
  */
-export function initializeConfig(url, env) {
+export function buildConfig(url, env) {
   return {
-    USER_ID: env.USER_ID || defaultConfig.USER_ID,
-    PASSWORD: env.PASSWORD || defaultConfig.PASSWORD,
-    RELAY_ADDR: url.searchParams.get('relay') || env.RELAY_ADDR || defaultConfig.RELAY_ADDR,
-    DOH_URL: url.searchParams.get('doh') || env.DOH_URL || defaultConfig.DOH_URL,
-    LOG_LEVEL: url.searchParams.get('log') || env.LOG_LEVEL || defaultConfig.LOG_LEVEL,
+    USER_ID: env.USER_ID || defaults.USER_ID,
+    PASSWORD: env.PASSWORD || defaults.PASSWORD,
+    RELAY_ADDR: url.searchParams.get('relay') || env.RELAY_ADDR || defaults.RELAY_ADDR,
+    DOH_URL: url.searchParams.get('doh') || env.DOH_URL || defaults.DOH_URL,
+    LOG_LEVEL: url.searchParams.get('log') || env.LOG_LEVEL || defaults.LOG_LEVEL,
   };
 }
 

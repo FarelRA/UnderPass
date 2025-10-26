@@ -7,9 +7,9 @@
 
 import { VLESS } from '../lib/config.js';
 import { logger } from '../lib/logger.js';
-import { handleTcpProxy } from '../protocol/tcp.js';
-import { handleUdpProxy } from '../protocol/udp.js';
-import { getFirstChunk, createWebSocketStreams, stringifyUUID } from '../lib/utils.js';
+import { proxyTcp } from '../protocol/tcp.js';
+import { proxyUdp } from '../protocol/udp.js';
+import { readFirstChunk, createStreams, uuidToString } from '../lib/utils.js';
 
 // === Constants ===
 
@@ -26,43 +26,39 @@ const vlessResponse = new Uint8Array([0, 0]);
  * @param {object} config - The request-scoped configuration object.
  * @returns {Response} A 101 Switching Protocols response with the client WebSocket.
  */
-export function handleVlessRequest(request, config) {
+export function handleVless(request, config) {
   logger.trace('VLESS:HANDLER', 'Creating WebSocket pair');
   
-  // Create WebSocket pair: [0] for client, [1] for worker
   const pair = new WebSocketPair();
-  const [clientWebSocket, workerWebSocket] = pair;
+  const [clientSocket, serverSocket] = pair;
 
-  // Accept the worker-side WebSocket
-  workerWebSocket.accept();
+  serverSocket.accept();
   logger.debug('VLESS:WEBSOCKET', 'WebSocket connection accepted');
 
-  // Process VLESS connection asynchronously
   logger.info('VLESS:PROCESS', 'Starting VLESS connection processing');
-  processVlessConnection(request, workerWebSocket, config).catch((err) => {
+  processVless(request, serverSocket, config).catch((err) => {
     logger.error('VLESS:ERROR', `Connection failed: ${err.message}`);
-    workerWebSocket.close(1011, `ERROR: ${err.message}`);
+    serverSocket.close(1011, `ERROR: ${err.message}`);
   });
 
   logger.debug('VLESS:HANDLER', 'Returning 101 Switching Protocols response');
-  return new Response(null, { status: 101, webSocket: clientWebSocket });
+  return new Response(null, { status: 101, webSocket: clientSocket });
 }
 
 // === Private Helper Functions ===
 
 /**
- * Processes the VLESS protocol header from a Uint8Array.
- * Parses version, user ID, command, address, port, and payload.
+ * Parses the VLESS protocol header from a Uint8Array.
+ * Extracts version, user ID, command, address, port, and payload.
  *
  * @param {Uint8Array} chunk - The initial data chunk containing the VLESS header.
- * @returns {{vlessVersion: Uint8Array, userID: string, protocol: string, address: string, port: number, payload: Uint8Array}}
+ * @returns {{version: Uint8Array, userId: string, protocol: string, address: string, port: number, payload: Uint8Array}}
  *          Parsed VLESS header components.
  * @throws {Error} If the header is malformed or too short.
  */
-function processVlessHeader(chunk) {
+function parseHeader(chunk) {
   logger.trace('VLESS:HEADER', `Processing header (${chunk.byteLength} bytes)`);
 
-  // Validate minimum header length
   if (chunk.byteLength < VLESS.MIN_HEADER_LENGTH) {
     const error = `Invalid VLESS header: insufficient length. Got ${chunk.byteLength}, expected at least ${VLESS.MIN_HEADER_LENGTH}`;
     logger.error('VLESS:HEADER', error);
@@ -72,78 +68,78 @@ function processVlessHeader(chunk) {
   let offset = 0;
   const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
 
-  // Parse VLESS Version (1 byte)
-  const vlessVersion = chunk.subarray(offset, VLESS.VERSION_LENGTH);
+  // Parse version (1 byte)
+  const version = chunk.subarray(offset, VLESS.VERSION_LENGTH);
   offset += VLESS.VERSION_LENGTH;
-  logger.trace('VLESS:HEADER', `Version: ${vlessVersion[0]}`);
+  logger.trace('VLESS:HEADER', `Version: ${version[0]}`);
 
-  // Parse User ID (16 bytes UUID)
-  const userID = stringifyUUID(chunk.subarray(offset, offset + VLESS.USERID_LENGTH));
+  // Parse UUID (16 bytes)
+  const userId = uuidToString(chunk.subarray(offset, offset + VLESS.USERID_LENGTH));
   offset += VLESS.USERID_LENGTH;
-  logger.trace('VLESS:HEADER', `User ID: ${userID}`);
+  logger.trace('VLESS:HEADER', `User ID: ${userId}`);
 
-  // Parse Addon Section (variable length)
+  // Parse addon section (variable length)
   const addonLength = chunk[offset];
   offset += 1 + addonLength;
   logger.trace('VLESS:HEADER', `Addon length: ${addonLength}`);
 
-  // Parse Command (1 byte)
+  // Parse command (1 byte)
   const command = chunk[offset++];
   const protocol = command === VLESS.COMMAND.TCP ? 'TCP' : command === VLESS.COMMAND.UDP ? 'UDP' : null;
   logger.debug('VLESS:HEADER', `Protocol: ${protocol} (command: ${command})`);
 
-  // Parse Port (2 bytes, big-endian)
+  // Parse port (2 bytes, big-endian)
   const port = view.getUint16(offset);
   offset += 2;
 
-  // Parse Address (variable length based on type)
+  // Parse address (variable length based on type)
   const addressType = chunk[offset++];
   const parsedAddress = parseAddress(chunk, view, addressType, offset);
   const address = parsedAddress.value;
-  offset = parsedAddress.newOffset;
+  offset = parsedAddress.offset;
   logger.debug('VLESS:HEADER', `Destination: ${address}:${port}`);
 
   // Extract remaining payload
   const payload = chunk.subarray(offset);
   logger.debug('VLESS:HEADER', `Payload size: ${payload.byteLength} bytes`);
 
-  return { vlessVersion, userID, protocol, address, port, payload };
+  return { version, userId, protocol, address, port, payload };
 }
 
 /**
  * Processes a VLESS connection: reads header, authenticates, and dispatches to protocol handler.
  *
  * @param {Request} request - The original incoming request.
- * @param {WebSocket} clientWebSocket - The worker-side of the WebSocketPair.
+ * @param {WebSocket} serverSocket - The server-side of the WebSocketPair.
  * @param {object} config - The request-scoped configuration.
  * @returns {Promise<void>}
  * @throws {Error} If authentication fails or protocol handling fails.
  */
-async function processVlessConnection(request, clientWebSocket, config) {
+async function processVless(request, serverSocket, config) {
   logger.trace('VLESS:PROCESS', 'Starting connection processing');
 
-  // Get first chunk from WebSocket
+  // Read first chunk from WebSocket
   logger.debug('VLESS:STREAM', 'Reading first chunk from WebSocket');
-  const firstChunk = await getFirstChunk(request, clientWebSocket);
+  const firstChunk = await readFirstChunk(request, serverSocket);
   logger.debug('VLESS:STREAM', `Received first chunk: ${firstChunk.byteLength} bytes`);
 
-  // Create readable and writable streams for subsequent data
+  // Create streams for subsequent data
   logger.trace('VLESS:STREAM', 'Creating WebSocket streams');
-  const webStream = createWebSocketStreams(clientWebSocket);
+  const clientStream = createStreams(serverSocket);
   logger.debug('VLESS:STREAM', 'Streams created successfully');
 
   // Parse VLESS header
   logger.debug('VLESS:HEADER', 'Parsing VLESS header');
-  const { userID, protocol, address, port, payload } = processVlessHeader(firstChunk);
+  const { userId, protocol, address, port, payload } = parseHeader(firstChunk);
 
   // Authenticate user
-  logger.debug('VLESS:AUTH', `Authenticating user: ${userID}`);
-  if (userID !== config.USER_ID) {
-    const error = `Authentication failed. Expected: ${config.USER_ID}, Got: ${userID}`;
+  logger.debug('VLESS:AUTH', `Authenticating user: ${userId}`);
+  if (userId !== config.USER_ID) {
+    const error = `Authentication failed. Expected: ${config.USER_ID}, Got: ${userId}`;
     logger.warn('VLESS:AUTH', error);
     throw new Error(error);
   }
-  logger.info('VLESS:AUTH', `User authenticated successfully: ${userID}`);
+  logger.info('VLESS:AUTH', `User authenticated successfully: ${userId}`);
 
   // Update logging context with remote address
   logger.updateLogContext({ remoteAddress: address, remotePort: port });
@@ -151,13 +147,13 @@ async function processVlessConnection(request, clientWebSocket, config) {
 
   // Send VLESS handshake response
   logger.debug('VLESS:HANDSHAKE', 'Sending handshake response to client');
-  await webStream.writable.write(vlessResponse);
+  await clientStream.writable.write(vlessResponse);
   logger.trace('VLESS:HANDSHAKE', 'Handshake response sent');
 
   // Dispatch to appropriate protocol handler
   if (protocol === 'TCP') {
     logger.info('VLESS:DISPATCH', 'Dispatching to TCP proxy handler');
-    await handleTcpProxy(address, port, webStream, payload, config);
+    await proxyTcp(address, port, clientStream, payload, config);
   } else if (protocol === 'UDP') {
     // UDP only supports DNS (port 53)
     if (port !== 53) {
@@ -166,7 +162,7 @@ async function processVlessConnection(request, clientWebSocket, config) {
       throw new Error(error);
     }
     logger.info('VLESS:DISPATCH', 'Dispatching to UDP proxy handler');
-    await handleUdpProxy(webStream, payload, config);
+    await proxyUdp(clientStream, payload, config);
   } else {
     const error = `Unsupported protocol: ${protocol}`;
     logger.error('VLESS:DISPATCH', error);
@@ -184,7 +180,7 @@ async function processVlessConnection(request, clientWebSocket, config) {
  * @param {DataView} view - DataView for reading multi-byte values.
  * @param {number} addressType - The type of address (1=IPv4, 2=FQDN, 3=IPv6).
  * @param {number} offset - Current offset in the chunk.
- * @returns {{value: string, newOffset: number}} The parsed address and updated offset.
+ * @returns {{value: string, offset: number}} The parsed address and updated offset.
  * @throws {Error} If address type is invalid.
  */
 function parseAddress(chunk, view, addressType, offset) {
@@ -194,14 +190,14 @@ function parseAddress(chunk, view, addressType, offset) {
     case VLESS.ADDRESS_TYPE.IPV4: {
       const address = `${chunk[offset]}.${chunk[offset + 1]}.${chunk[offset + 2]}.${chunk[offset + 3]}`;
       logger.trace('VLESS:ADDRESS', `IPv4: ${address}`);
-      return { value: address, newOffset: offset + 4 };
+      return { value: address, offset: offset + 4 };
     }
 
     case VLESS.ADDRESS_TYPE.FQDN: {
-      const domainLength = chunk[offset++];
-      const address = textDecoder.decode(chunk.subarray(offset, offset + domainLength));
+      const length = chunk[offset++];
+      const address = textDecoder.decode(chunk.subarray(offset, offset + length));
       logger.trace('VLESS:ADDRESS', `FQDN: ${address}`);
-      return { value: address, newOffset: offset + domainLength };
+      return { value: address, offset: offset + length };
     }
 
     case VLESS.ADDRESS_TYPE.IPV6: {
@@ -211,7 +207,7 @@ function parseAddress(chunk, view, addressType, offset) {
         .getUint16(offset + 10)
         .toString(16)}:${view.getUint16(offset + 12).toString(16)}:${view.getUint16(offset + 14).toString(16)}]`;
       logger.trace('VLESS:ADDRESS', `IPv6: ${address}`);
-      return { value: address, newOffset: offset + 16 };
+      return { value: address, offset: offset + 16 };
     }
 
     default: {
