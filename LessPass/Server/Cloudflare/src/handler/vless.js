@@ -48,65 +48,6 @@ export function handleVless(request, config) {
 // === Private Helper Functions ===
 
 /**
- * Parses the VLESS protocol header from a Uint8Array.
- * Extracts version, user ID, command, address, port, and payload.
- *
- * @param {Uint8Array} chunk - The initial data chunk containing the VLESS header.
- * @returns {{version: Uint8Array, userId: string, protocol: string, address: string, port: number, payload: Uint8Array}}
- *          Parsed VLESS header components.
- * @throws {Error} If the header is malformed or too short.
- */
-function parseHeader(chunk) {
-  logger.trace('VLESS:HEADER', `Processing header (${chunk.byteLength} bytes)`);
-
-  if (chunk.byteLength < VLESS.MIN_HEADER_LENGTH) {
-    const error = `Invalid VLESS header: insufficient length. Got ${chunk.byteLength}, expected at least ${VLESS.MIN_HEADER_LENGTH}`;
-    logger.error('VLESS:HEADER', error);
-    throw new Error(error);
-  }
-
-  let offset = 0;
-  const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
-
-  // Parse version (1 byte)
-  const version = chunk.subarray(offset, VLESS.VERSION_LENGTH);
-  offset += VLESS.VERSION_LENGTH;
-  logger.trace('VLESS:HEADER', `Version: ${version[0]}`);
-
-  // Parse UUID (16 bytes)
-  const userId = uuidToString(chunk.subarray(offset, offset + VLESS.USERID_LENGTH));
-  offset += VLESS.USERID_LENGTH;
-  logger.trace('VLESS:HEADER', `User ID: ${userId}`);
-
-  // Parse addon section (variable length)
-  const addonLength = chunk[offset];
-  offset += 1 + addonLength;
-  logger.trace('VLESS:HEADER', `Addon length: ${addonLength}`);
-
-  // Parse command (1 byte)
-  const command = chunk[offset++];
-  const protocol = command === VLESS.COMMAND.TCP ? 'TCP' : command === VLESS.COMMAND.UDP ? 'UDP' : null;
-  logger.debug('VLESS:HEADER', `Protocol: ${protocol} (command: ${command})`);
-
-  // Parse port (2 bytes, big-endian)
-  const port = view.getUint16(offset);
-  offset += 2;
-
-  // Parse address (variable length based on type)
-  const addressType = chunk[offset++];
-  const parsedAddress = parseAddress(chunk, view, addressType, offset);
-  const address = parsedAddress.value;
-  offset = parsedAddress.offset;
-  logger.debug('VLESS:HEADER', `Destination: ${address}:${port}`);
-
-  // Extract remaining payload
-  const payload = chunk.subarray(offset);
-  logger.debug('VLESS:HEADER', `Payload size: ${payload.byteLength} bytes`);
-
-  return { version, userId, protocol, address, port, payload };
-}
-
-/**
  * Processes a VLESS connection: reads header, authenticates, and dispatches to protocol handler.
  *
  * @param {Request} request - The original incoming request.
@@ -170,6 +111,65 @@ async function processVless(request, serverSocket, config) {
   }
 
   logger.info('VLESS:PROCESS', `${protocol} proxy completed successfully`);
+}
+
+/**
+ * Parses the VLESS protocol header from a Uint8Array.
+ * Extracts version, user ID, command, address, port, and payload.
+ *
+ * @param {Uint8Array} chunk - The initial data chunk containing the VLESS header.
+ * @returns {{version: Uint8Array, userId: string, protocol: string, address: string, port: number, payload: Uint8Array}}
+ *          Parsed VLESS header components.
+ * @throws {Error} If the header is malformed or too short.
+ */
+function parseHeader(chunk) {
+  logger.trace('VLESS:HEADER', `Processing header (${chunk.byteLength} bytes)`);
+
+  if (chunk.byteLength < VLESS.MIN_HEADER_LENGTH) {
+    const error = `Invalid VLESS header: insufficient length. Got ${chunk.byteLength}, expected at least ${VLESS.MIN_HEADER_LENGTH}`;
+    logger.error('VLESS:HEADER', error);
+    throw new Error(error);
+  }
+
+  let offset = 0;
+  const view = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+
+  // Parse version (1 byte)
+  const version = chunk.subarray(offset, VLESS.VERSION_LENGTH);
+  offset += VLESS.VERSION_LENGTH;
+  logger.trace('VLESS:HEADER', `Version: ${version[0]}`);
+
+  // Parse UUID (16 bytes)
+  const userId = uuidToString(chunk.subarray(offset, offset + VLESS.USERID_LENGTH));
+  offset += VLESS.USERID_LENGTH;
+  logger.trace('VLESS:HEADER', `User ID: ${userId}`);
+
+  // Parse addon section (variable length)
+  const addonLength = chunk[offset];
+  offset += 1 + addonLength;
+  logger.trace('VLESS:HEADER', `Addon length: ${addonLength}`);
+
+  // Parse command (1 byte)
+  const command = chunk[offset++];
+  const protocol = command === VLESS.COMMAND.TCP ? 'TCP' : command === VLESS.COMMAND.UDP ? 'UDP' : null;
+  logger.debug('VLESS:HEADER', `Protocol: ${protocol} (command: ${command})`);
+
+  // Parse port (2 bytes, big-endian)
+  const port = view.getUint16(offset);
+  offset += 2;
+
+  // Parse address (variable length based on type)
+  const addressType = chunk[offset++];
+  const parsedAddress = parseAddress(chunk, view, addressType, offset);
+  const address = parsedAddress.value;
+  offset = parsedAddress.offset;
+  logger.debug('VLESS:HEADER', `Destination: ${address}:${port}`);
+
+  // Extract remaining payload
+  const payload = chunk.subarray(offset);
+  logger.debug('VLESS:HEADER', `Payload size: ${payload.byteLength} bytes`);
+
+  return { version, userId, protocol, address, port, payload };
 }
 
 /**
