@@ -6,6 +6,7 @@
 
 import { connect } from 'cloudflare:sockets';
 import { logger } from '../lib/logger.js';
+import { isExpectedError } from '../lib/utils.js';
 
 // === Public API ===
 
@@ -160,19 +161,12 @@ async function pipeStream(reader, writer, direction) {
     await writer.close();
     logger.trace('TCP:PIPE', `${direction} writer closed`);
   } catch (error) {
-    // Check if it's a normal disconnect (stream closed)
-    const isNormalDisconnect = error.message?.includes('closed') || error.message?.includes('abort');
-    
-    if (isNormalDisconnect) {
-      logger.debug('TCP:PIPE', `${direction} closed (normal disconnect)`);
+    await writer.abort(error).catch(() => {});
+
+    if (isExpectedError(error)) {
+      logger.info('TCP:PIPE', `${direction} closed`);
     } else {
       logger.error('TCP:PIPE', `${direction} error: ${error.message}`);
-    }
-    
-    await writer.abort(error).catch(() => {});
-    
-    // Don't throw on normal disconnects
-    if (!isNormalDisconnect) {
       throw error;
     }
   } finally {
