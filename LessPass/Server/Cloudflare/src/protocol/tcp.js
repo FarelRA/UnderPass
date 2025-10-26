@@ -101,7 +101,11 @@ async function connectAndTest(hostname, port, payload) {
     logger.debug('TCP:CONNECT', `Received first response: ${result.value.byteLength} bytes`);
     return { readable, writable, firstChunk: result.value };
   } catch (error) {
-    logger.error('TCP:CONNECT', `Connection failed: ${error.message}`);
+    if (isExpectedError(error)) {
+      logger.debug('TCP:CONNECT', `Connection closed: ${error.message}`);
+    } else {
+      logger.error('TCP:CONNECT', `Connection failed: ${error.message}`);
+    }
     throw error;
   }
 }

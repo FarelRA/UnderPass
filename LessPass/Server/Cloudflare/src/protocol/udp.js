@@ -5,7 +5,7 @@
 // =================================================================
 
 import { logger } from '../lib/logger.js';
-import { concatBuffers } from '../lib/utils.js';
+import { concatBuffers, isExpectedError } from '../lib/utils.js';
 
 // === Public API ===
 
@@ -38,7 +38,11 @@ export async function proxyUdp(clientStream, payload, config) {
     await sendResponse(clientStream.writable, response);
     logger.info('UDP:PROXY', 'DNS query processed successfully');
   } catch (error) {
-    logger.error('UDP:PROXY', `DNS query failed: ${error.message}`);
+    if (isExpectedError(error)) {
+      logger.debug('UDP:PROXY', `Connection closed: ${error.message}`);
+    } else {
+      logger.error('UDP:PROXY', `DNS query failed: ${error.message}`);
+    }
     throw error;
   }
 }
@@ -79,9 +83,8 @@ async function readPacket(payload, reader) {
     const { value, done } = await reader.read();
     
     if (done) {
-      const error = 'WebSocket closed before complete packet received';
-      logger.error('UDP:PACKET', error);
-      throw new Error(error);
+      logger.debug('UDP:PACKET', 'Stream closed before complete packet received');
+      throw new Error('Stream closed');
     }
 
     chunksRead++;
@@ -130,7 +133,11 @@ async function queryDns(query, config) {
 
     return result;
   } catch (error) {
-    logger.error('UDP:DOH', `DoH query failed: ${error.message}`);
+    if (isExpectedError(error)) {
+      logger.debug('UDP:DOH', `Connection closed: ${error.message}`);
+    } else {
+      logger.error('UDP:DOH', `DoH query failed: ${error.message}`);
+    }
     throw error;
   }
 }
