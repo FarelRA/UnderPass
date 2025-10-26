@@ -211,8 +211,10 @@ export function uuidToString(bytes) {
  * @returns {Uint8Array} Combined buffer containing both inputs.
  */
 export function concatBuffers(buffer1, buffer2) {
+  logger.trace('UTILS:CONCAT', `Concatenating buffers: ${buffer1.byteLength} + ${buffer2.byteLength} bytes`);
   const result = new Uint8Array(buffer1.byteLength + buffer2.byteLength);
   result.set(buffer1, 0);
   result.set(buffer2, buffer1.byteLength);
+  logger.trace('UTILS:CONCAT', `Result: ${result.byteLength} bytes`);
   return result;
 }

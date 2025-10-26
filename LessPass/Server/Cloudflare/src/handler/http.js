@@ -38,7 +38,6 @@ export async function handleHttp(request, env, config) {
 
   // Return masquerade 404 for all other paths
   logger.info('HTTP:MASQUERADE', `Returning masquerade 404 for path: ${url.pathname}`);
-  logger.trace('HTTP:MASQUERADE', 'Mimicking nginx 404 page');
   return new Response(MASQUERADE_RESPONSE, {
     status: 404,
     headers: { 'Content-Type': 'text/html' },

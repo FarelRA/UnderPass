@@ -84,11 +84,9 @@ async function connectAndTest(hostname, port, payload) {
     const writable = socket.writable.getWriter();
     logger.trace('TCP:CONNECT', 'Socket created, readers/writers obtained');
 
-    // Send payload if present
-    if (payload.byteLength > 0) {
-      logger.trace('TCP:CONNECT', `Sending payload: ${payload.byteLength} bytes`);
-      await writable.write(payload);
-    }
+    // Send payload
+    logger.trace('TCP:CONNECT', `Sending payload: ${payload.byteLength} bytes`);
+    await writable.write(payload);
 
     // Wait for first response to validate connection
     logger.trace('TCP:CONNECT', 'Waiting for first response from remote');
@@ -126,8 +124,8 @@ async function proxyStreams(clientStream, remoteStream, firstChunk) {
   // Set up bidirectional data piping
   logger.debug('TCP:PROXY', 'Setting up bidirectional data pipes');
   await Promise.all([
-    pipeStream(clientStream.readable, remoteStream.writable, 'Client→Remote'),
-    pipeStream(remoteStream.readable, clientStream.writable, 'Remote→Client'),
+    pipeStream(clientStream.readable, remoteStream.writable, 'Client → Remote'),
+    pipeStream(remoteStream.readable, clientStream.writable, 'Remote → Client'),
   ]);
   
   logger.debug('TCP:PROXY', 'Bidirectional proxy completed');
