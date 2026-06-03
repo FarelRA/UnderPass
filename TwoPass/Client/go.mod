@@ -3,7 +3,7 @@ module twopass
 go 1.25.3
 
 require (
-	github.com/quic-go/quic-go v0.57.0
+	github.com/quic-go/quic-go v0.59.1
 	golang.org/x/net v0.47.0
 )
 
